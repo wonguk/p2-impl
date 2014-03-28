@@ -1,10 +1,6 @@
 package storageserver
 
-import (
-	"errors"
-
-	"github.com/cmu440/tribbler/rpc/storagerpc"
-)
+import "github.com/cmu440/tribbler/rpc/storagerpc"
 
 type cmd interface {
 	run(node *storageNode) error

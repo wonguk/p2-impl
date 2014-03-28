@@ -1,5 +1,7 @@
 package storageserver
 
+import "time"
+
 func leaseMaster(key string, add chan string, revoke, done chan struct{}) {
 	leases := make(map[int]chan bool)
 	back := make(chan int)
