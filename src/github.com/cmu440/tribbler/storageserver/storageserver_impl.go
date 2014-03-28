@@ -53,7 +53,7 @@ func NewStorageServer(masterServerHostPort string, numNodes, port int, nodeID ui
 	rpc.HandleHTTP()
 	l, e := net.Listen("tcp", ":"+port)
 	if e != nil {
-		return nil, errors.New("Error Listening to port:", port)
+		return nil, errors.New("error listening to port", port)
 	}
 	go http.Serve(l, nil)
 
@@ -65,7 +65,7 @@ func NewStorageServer(masterServerHostPort string, numNodes, port int, nodeID ui
 
 func (ss *storageServer) RegisterServer(args *storagerpc.RegisterArgs, reply *storagerpc.RegisterReply) error {
 	if !ss.master {
-		return errors.New("Cannot Register Server to a Slave Server")
+		return errors.New("cannot register server to a slave server")
 	}
 
 	ss.masterLock.Lock()
@@ -85,7 +85,7 @@ func (ss *storageServer) RegisterServer(args *storagerpc.RegisterArgs, reply *st
 	}
 
 	if len(ss.servers) == ss.numNodes-1 {
-		return errors.New("Already have all the slave servers online")
+		return errors.New("already have all the slave servers online")
 	}
 
 	ss.servers = append(ss.servers, args.SerferInfo)

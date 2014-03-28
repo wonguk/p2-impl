@@ -49,7 +49,7 @@ func leaseMaster(key string, add chan string, revoke, done chan struct{}) {
 
 			go leaseHandler(l, key, cur, kill, back)
 
-			cur += 1
+			cur++
 		case l := <-back:
 			delete(leases, l)
 		}
