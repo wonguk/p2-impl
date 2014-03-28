@@ -2,12 +2,14 @@ package storageserver
 
 import (
 	"errors"
+	"sync"
 
 	"github.com/cmu440/tribbler/rpc/storagerpc"
 )
 
 type storageServer struct {
 	master       bool
+	masterLock   sync.Mutex
 	masterAddr   string
 	numNodes     int
 	port         int
@@ -39,6 +41,7 @@ func NewStorageServer(masterServerHostPort string, numNodes, port int, nodeID ui
 		ss.master = false
 	}
 
+	ss.masterLock = &sync.Mutex{}
 	ss.masterAddr = masterServerHostPort
 	ss.numNodes = numNodes
 	ss.port = port
@@ -60,9 +63,41 @@ func NewStorageServer(masterServerHostPort string, numNodes, port int, nodeID ui
 	return nil
 }
 
-//TODO Implement RegisterServer
 func (ss *storageServer) RegisterServer(args *storagerpc.RegisterArgs, reply *storagerpc.RegisterReply) error {
-	return errors.New("not implemented")
+	if !ss.master {
+		return errors.New("Cannot Register Server to a Slave Server")
+	}
+
+	ss.masterLock.Lock()
+	defer ss.masterLock.Unlock()
+
+	if len(ss.servers) == ss.numNodes-1 {
+		reply.Status = storagerpc.Ok
+		reply.Servers = ss.servers
+		return nil
+	}
+
+	for _, node := range ss.servers {
+		if node.NodeID == args.ServerInfo.NodeID {
+			reply.Status = storagerpc.NotReay
+			return nil
+		}
+	}
+
+	if len(ss.servers) == ss.numNodes-1 {
+		return errors.New("Already have all the slave servers online")
+	}
+
+	ss.servers = append(ss.servers, args.SerferInfo)
+
+	if len(ss.servers) == ss.numNodes-1 {
+		reply.Status = storagerpc.Ok
+		reply.Servers = ss.servers
+	} else {
+		reply.Status = storagerpc.NotReady
+	}
+
+	return nil
 }
 
 func (ss *storageServer) GetServers(args *storagerpc.GetServersArgs, reply *storagerpc.GetServersReply) error {
