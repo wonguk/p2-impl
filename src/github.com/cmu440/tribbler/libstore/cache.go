@@ -23,7 +23,7 @@ type cacheMaster struct {
 	cacheMap     map[string]chan *cacheRequest
 	cacheChan    chan *cacheRequest
 	newCacheChan chan *cacheCell
-	delCacheChan chan *string
+	delCacheChan chan string
 }
 
 type cache struct {
@@ -42,7 +42,8 @@ type queryCell struct {
 type queryMaster struct {
 	queryMap map[string]chan *queryRequest
 
-	delChan chan string
+	queryChan chan *queryRequest
+	delChan   chan string
 }
 
 type cacheRequest struct {
@@ -133,8 +134,6 @@ func (ch *cacheCell) cacheHandler(delCacheChan chan string) {
 }
 
 func (qm *queryMaster) startQueryMaster() {
-	qm.queryMap = make(map[string]*queryCell)
-
 	for {
 		select {
 		case req := <-qm.queryChan:

@@ -7,7 +7,14 @@ import (
 )
 
 type libstore struct {
-	// TODO: implement this!
+	mode         LeaseMode
+	masterServer string
+	hostport     string
+
+	storageservers []storagerpc.Node
+
+	queryMaster *queryMaster
+	cacheMaster *cacheMaster
 }
 
 // NewLibstore creates a new instance of a TribServer's libstore. masterServerHostPort
@@ -35,11 +42,56 @@ type libstore struct {
 // need to create a brand new HTTP handler to serve the requests (the Libstore may
 // simply reuse the TribServer's HTTP handler since the two run in the same process).
 func NewLibstore(masterServerHostPort, myHostPort string, mode LeaseMode) (Libstore, error) {
-	return nil, errors.New("not implemented")
+	ls = new(libstore)
+
+	ls.mode = mode
+	ls.masterServer = masterServerHostPort
+	ls.hostport = myHostPort
+
+	rpc.RegisterName("LeaseCallbacks", librpc.Wrap(libstore))
+
+	qm = new(queryMaster)
+
+	qm.queryMap = make(map[string]*queryCell)
+	qm.delChan = make(chan string)
+	qm.queryChan = make(chan *queryRequest)
+
+	go qm.startQueryMaster()
+
+	cm = new(cacheMaster)
+
+	cm.cacheMap = make(map[string]chan *cacheRequest)
+	cm.cacheChan = make(chan *cacheRequest)
+	cm.newCacheChan = make(chan *cacheCell)
+	cm.delCacheChan = make(chan string)
+
+	go cm.startCacheMaster()
+
+	ls.queryMaster = qm
+	ls.cacheMaster = cm
+
+	//TODO Get storage server addresses, and sort them by NodeID
+
+	return ls
 }
 
 func (ls *libstore) Get(key string) (string, error) {
-	return "", errors.New("not implemented")
+	cache := ls.queryCache(key)
+
+	if cache != nil {
+		return cache.data, nil
+	}
+
+	lease := ls.requestLease(key)
+
+	args := storagerpc.GetArgs{
+		Key:       key,
+		WantLease: lease,
+		HostPort:  ls.hostport,
+	}
+
+	//TODO Make rpc call to storage server
+	//TODO If recieved lease, store to cache
 }
 
 func (ls *libstore) Put(key, value string) error {
@@ -60,4 +112,46 @@ func (ls *libstore) AppendToList(key, newItem string) error {
 
 func (ls *libstore) RevokeLease(args *storagerpc.RevokeLeaseArgs, reply *storagerpc.RevokeLeaseReply) error {
 	return errors.New("not implemented")
+}
+
+// Given the key, figures out the address of the relevant storage server
+func (ls *libstore) getStorateServer(key string) string {
+	hash := StireHash(key)
+
+	return ls.storageservers[hash%len(ls.storageservers)]
+}
+
+func (ls *libstore) requestLease(key string) bool {
+	switch ls.mode {
+	case Never:
+		return false
+	case Always:
+		return true
+	case Normal:
+		return ls.queryQuery(key)
+	}
+}
+
+func (ls *libstore) queryCache(key string) *cache {
+	cache := make(chan *Cache)
+
+	request := cacheRequest{
+		key, cache,
+	}
+
+	ls.cacheChan <- request
+
+	return <-cache
+}
+
+func (ls *libstore) queryQuery(key string) bool {
+	lease := make(chan bool)
+
+	request := queryRequest{
+		key, lease,
+	}
+
+	ls.queryChan <- request
+
+	return <-lease
 }
