@@ -92,7 +92,7 @@ func (ls *libstore) Get(key string) (string, error) {
 		HostPort:  ls.hostport,
 	}
 
-	//TODO Make rpc call to storage server
+	// Make rpc call to storage server
 	client, err := rpc.DialHTTP("tcp", ls.hostport)
 	if err != nil {
 		return "", err
@@ -106,11 +106,11 @@ func (ls *libstore) Get(key string) (string, error) {
 		return "", err
 	}
 
-	//TODO If recieved lease, store to cache
+	// If recieved lease, store to cache
 	switch reply.Status {
 	case storagerpc.Ok:
 		if reply.Lease.Granted {
-			//TODO Add to cache
+			ls.addToCache(key, reply.Value, nil, reply.Lease.ValidSeconds)
 		}
 
 		return reply.Value, nil
@@ -130,23 +130,177 @@ func (ls *libstore) Get(key string) (string, error) {
 }
 
 func (ls *libstore) Put(key, value string) error {
-	return errors.New("not implemented")
+	client, err := rpc.DialHTTP("tcp", ls.hostport)
+	if err != nil {
+		return err
+	}
+
+	args := storagerpc.PutArgs{
+		key, value,
+	}
+
+	var reply storagerpc.PutReply
+
+	err = client.Call("RemoteStorageServer.Put", args, &reply)
+	if err != nil {
+		return err
+	}
+
+	switch reply.Status {
+	case storagerpc.Ok:
+		return nil
+	case storagerpc.KeyNotFound:
+		return errors.New("key not found")
+	case storagerpc.ItemNotFoun:
+		return errors.New("item not found")
+	case storagerpc.WrongServer:
+		return errors.New("wrong server")
+	case storagerpc.ItemExists:
+		return errors.New("items exist")
+	case storagerpc.NotReady:
+		return errors.New("not ready")
+	default:
+		return errors.New("invalid status")
+	}
 }
 
 func (ls *libstore) GetList(key string) ([]string, error) {
-	return nil, errors.New("not implemented")
+	cache := ls.queryCache(key)
+
+	if cache != nil {
+		return cache.data, nil
+	}
+
+	lease := ls.requestLease(key)
+
+	args := storagerpc.GetArgs{
+		Key:       key,
+		WantLease: lease,
+		HostPort:  ls.hostport,
+	}
+
+	// Make rpc call to storage server
+	client, err := rpc.DialHTTP("tcp", ls.hostport)
+	if err != nil {
+		return "", err
+	}
+
+	var reply storagerpc.GetListReply
+
+	err = client.Call("RemoteStorageServer.GetList", args, &reply)
+
+	if err != nil {
+		return "", err
+	}
+
+	// If recieved lease, store to cache
+	switch reply.Status {
+	case storagerpc.Ok:
+		if reply.Lease.Granted {
+			ls.addToCache(key, "", reply.Value, reply.Lease.ValidSeconds)
+		}
+
+		return reply.Value, nil
+	case storagerpc.KeyNotFound:
+		return "", errors.New("key not found")
+	case storagerpc.ItemNotFoun:
+		return "", errors.New("item not found")
+	case storagerpc.WrongServer:
+		return "", errors.New("wrong server")
+	case storagerpc.ItemExists:
+		return "", errors.New("items exist")
+	case storagerpc.NotReady:
+		return "", errors.New("not ready")
+	default:
+		return "", errors.New("invalid status")
+	}
 }
 
 func (ls *libstore) RemoveFromList(key, removeItem string) error {
-	return errors.New("not implemented")
+	client, err := rpc.DialHTTP("tcp", ls.hostport)
+	if err != nil {
+		return err
+	}
+
+	args := storagerpc.PutArgs{
+		key, removeItem,
+	}
+
+	var reply storagerpc.PutReply
+
+	err = client.Call("RemoteStorageServer.RemoveFromList", args, &reply)
+	if err != nil {
+		return err
+	}
+
+	switch reply.Status {
+	case storagerpc.Ok:
+		return nil
+	case storagerpc.KeyNotFound:
+		return errors.New("key not found")
+	case storagerpc.ItemNotFoun:
+		return errors.New("item not found")
+	case storagerpc.WrongServer:
+		return errors.New("wrong server")
+	case storagerpc.ItemExists:
+		return errors.New("items exist")
+	case storagerpc.NotReady:
+		return errors.New("not ready")
+	default:
+		return errors.New("invalid status")
+	}
 }
 
 func (ls *libstore) AppendToList(key, newItem string) error {
-	return errors.New("not implemented")
+	client, err := rpc.DialHTTP("tcp", ls.hostport)
+	if err != nil {
+		return err
+	}
+
+	args := storagerpc.PutArgs{
+		key, newItem,
+	}
+
+	var reply storagerpc.PutReply
+
+	err = client.Call("RemoteStorageServer.AppendToList", args, &reply)
+	if err != nil {
+		return err
+	}
+
+	switch reply.Status {
+	case storagerpc.Ok:
+		return nil
+	case storagerpc.KeyNotFound:
+		return errors.New("key not found")
+	case storagerpc.ItemNotFoun:
+		return errors.New("item not found")
+	case storagerpc.WrongServer:
+		return errors.New("wrong server")
+	case storagerpc.ItemExists:
+		return errors.New("items exist")
+	case storagerpc.NotReady:
+		return errors.New("not ready")
+	default:
+		return errors.New("invalid status")
+	}
 }
 
 func (ls *libstore) RevokeLease(args *storagerpc.RevokeLeaseArgs, reply *storagerpc.RevokeLeaseReply) error {
-	return errors.New("not implemented")
+	ok := make(chan bool)
+	req := revokeRequest{
+		key, ok,
+	}
+
+	ls.cacheMaster.revokeCacheChan <- &req
+
+	if <-ok {
+		reply.Status = storagerpc.Ok
+	} else {
+		reply.Status = storagerpc.ItemNotFound
+	}
+
+	return nil
 }
 
 // Given the key, figures out the address of the relevant storage server
@@ -189,4 +343,18 @@ func (ls *libstore) queryQuery(key string) bool {
 	ls.queryChan <- request
 
 	return <-lease
+}
+
+func (ls *libstore) addToCache(key, value string, listValue []string, duration int) {
+	cc := new(cacheCell)
+
+	cc.key = key
+	cc.value = value
+	cc.listValue = listValue
+	cc.duration = duration
+
+	cc.reqChan = make(chan *cacheRequest)
+	cc.delChan = make(chan struct{})
+
+	ls.cacheMaster.newCacheChan <- cc
 }

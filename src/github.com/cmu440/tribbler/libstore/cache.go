@@ -22,10 +22,11 @@ type cacheCell struct {
 }
 
 type cacheMaster struct {
-	cacheMap     map[string]chan *cacheRequest
-	cacheChan    chan *cacheRequest
-	newCacheChan chan *cacheCell
-	delCacheChan chan string
+	cacheMap        map[string]chan *cacheRequest
+	cacheChan       chan *cacheRequest
+	newCacheChan    chan *cacheCell
+	delCacheChan    chan string
+	revokeCacheChan chan *revokeRequest
 }
 
 type cache struct {
@@ -56,6 +57,11 @@ type cacheRequest struct {
 type queryRequest struct {
 	key   string
 	lease chan bool
+}
+
+type revokeRequest struct {
+	key string
+	ok  chan bool
 }
 
 // TODO QueryMaster: Keeps track of the different queries made
@@ -104,6 +110,15 @@ func (cm *cacheMaster) startCacheMaster() {
 				close(del.delChan)
 			}
 			delete(cm.cacheMap, key)
+		case rev := <-cm.revokeCacheChan:
+			c, ok := cm.cacheMap[rev.key]
+
+			if ok {
+				rev.ok <- true
+				close(c.delChan)
+			} else {
+				rev.ok <- false
+			}
 		}
 	}
 }
