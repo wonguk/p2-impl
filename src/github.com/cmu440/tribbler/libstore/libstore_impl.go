@@ -2,7 +2,9 @@ package libstore
 
 import (
 	"errors"
+	"net/rpc"
 
+	"github.com/cmu440/tribbler/rpc/librpc"
 	"github.com/cmu440/tribbler/rpc/storagerpc"
 )
 
@@ -91,7 +93,40 @@ func (ls *libstore) Get(key string) (string, error) {
 	}
 
 	//TODO Make rpc call to storage server
+	client, err := rpc.DialHTTP("tcp", ls.hostport)
+	if err != nil {
+		return "", err
+	}
+
+	var reply storagerpc.GetReply
+
+	err = client.Call("RemoteStorageServer.Get", args, &reply)
+
+	if err != nil {
+		return "", err
+	}
+
 	//TODO If recieved lease, store to cache
+	switch reply.Status {
+	case storagerpc.Ok:
+		if reply.Lease.Granted {
+			//TODO Add to cache
+		}
+
+		return reply.Value, nil
+	case storagerpc.KeyNotFound:
+		return "", errors.New("key not found")
+	case storagerpc.ItemNotFoun:
+		return "", errors.New("item not found")
+	case storagerpc.WrongServer:
+		return "", errors.New("wrong server")
+	case storagerpc.ItemExists:
+		return "", errors.New("items exist")
+	case storagerpc.NotReady:
+		return "", errors.New("not ready")
+	default:
+		return "", errors.New("invalid status")
+	}
 }
 
 func (ls *libstore) Put(key, value string) error {
