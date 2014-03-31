@@ -1,6 +1,9 @@
 package libstore
 
-import "time"
+import (
+	"github.com/cmu440/tribbler/rpc/storagerpc"
+	"time"
+)
 
 type valueType bool
 
@@ -22,10 +25,10 @@ type cacheCell struct {
 }
 
 type cacheMaster struct {
-	cacheMap        map[string]chan *cacheCell
+	cacheMap        map[string]*cacheCell
 	cacheChan       chan *cacheRequest
 	newCacheChan    chan *cacheCell
-	delCacheChan    chan string
+	deleteCacheChan chan string
 	revokeCacheChan chan *revokeRequest
 }
 
@@ -35,18 +38,19 @@ type cache struct {
 }
 
 type queryCell struct {
-	queryChan chan *queryRequest
-	delChan   chan struct{}
+	key        string
+	queryChan  chan *queryRequest
+	deleteChan chan struct{}
 
 	duration int
 	count    int
 }
 
 type queryMaster struct {
-	queryMap map[string]chan *queryRequest
+	queryMap map[string]*queryCell
 
-	queryChan chan *queryRequest
-	delChan   chan string
+	queryChan  chan *queryRequest
+	deleteChan chan string
 }
 
 type cacheRequest struct {
@@ -102,8 +106,8 @@ func (cm *cacheMaster) startCacheMaster() {
 		case newCache := <-cm.newCacheChan:
 			cm.cacheMap[newCache.key] = newCache
 			go newCache.cacheHandler(cm.deleteCacheChan)
-		case key := <-cm.delCacheChan:
-			del, ok := cm.cacheMap
+		case key := <-cm.deleteCacheChan:
+			del, ok := cm.cacheMap[key]
 			if ok {
 				close(del.delChan)
 			}
@@ -123,7 +127,7 @@ func (cm *cacheMaster) startCacheMaster() {
 
 func (ch *cacheCell) cacheHandler(delCacheChan chan string) {
 	duration := time.Duration(ch.duration) * time.Second
-	epoch = time.NewTimer(duration)
+	epoch := time.NewTimer(duration)
 
 	cache := cache{
 		data: ch.value, listData: ch.listValue,
@@ -133,16 +137,16 @@ func (ch *cacheCell) cacheHandler(delCacheChan chan string) {
 
 	for {
 		select {
-		case <-epoch:
-			delCacheChan <- c.key
+		case <-epoch.C:
+			delCacheChan <- ch.key
 			ch.valid = false
 		case <-ch.delChan:
 			return
-		case ret := <-ch.reqChan:
+		case req := <-ch.reqChan:
 			if ch.valid {
-				ret <- &cache
+				req.cache <- &cache
 			} else {
-				ret <- nil
+				req.cache <- nil
 			}
 		}
 	}
@@ -154,25 +158,25 @@ func (qm *queryMaster) startQueryMaster() {
 		case req := <-qm.queryChan:
 			query, ok := qm.queryMap[req.key]
 			if !ok {
-				query = new(queryMaster)
+				query = new(queryCell)
 
-				qc = make(chan *queryRequest)
-				dc = make(chan struct{})
+				qc := make(chan *queryRequest)
+				dc := make(chan struct{})
 				query.queryChan = qc
-				query.deleteCahn = dc
+				query.deleteChan = dc
 				query.key = req.key
 
 				qm.queryMap[req.key] = query
 
-				go query.queryHandler(qm.delChan)
+				go query.queryHandler(qm.deleteChan)
 			}
 
 			query.queryChan <- req
-		case key := <-qm.delChan:
+		case key := <-qm.deleteChan:
 			q, ok := qm.queryMap[key]
 
 			if ok {
-				close(del.delChan)
+				close(q.deleteChan)
 			}
 
 			delete(qm.queryMap, key)
@@ -181,23 +185,23 @@ func (qm *queryMaster) startQueryMaster() {
 }
 
 func (qc *queryCell) queryHandler(del chan string) {
-	duration = time.Duration(storagerpc.QueryCacheSeconds) * time.Second
-	epoch = time.NewTimer(duration)
+	duration := time.Duration(storagerpc.QueryCacheSeconds) * time.Second
+	epoch := time.NewTimer(duration)
 
 	for {
 		select {
 		case <-epoch.C:
-			delChan <- qc.key
+			del <- qc.key
 		case req := <-qc.queryChan:
 			qc.count++
-			if qc.count >= storagerpc.QueryCacheTresh {
+			if qc.count >= storagerpc.QueryCacheThresh {
 				req.lease <- true
 
-				delChan <- qc.key
+				del <- qc.key
 			} else {
 				req.lease <- false
 			}
-		case <-qc.delChan:
+		case <-qc.deleteChan:
 			return
 		}
 	}
