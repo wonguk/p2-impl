@@ -5,12 +5,19 @@ import (
 	"net"
 	"net/http"
 	"net/rpc"
+	"sort"
 	"strings"
 	"sync"
 
 	"github.com/cmu440/tribbler/libstore"
 	"github.com/cmu440/tribbler/rpc/storagerpc"
 )
+
+type Nodes []storagerpc.Node
+
+func (n Nodes) Len() int            { return len(n) }
+func (n Nodes) Swap(i, j, int)      { n[i], n[j] = n[j], n[i] }
+func (n Nodes) Less(i, j, int) bool { return n[i].NodeID < n[j].NodeID }
 
 type storageServer struct {
 	master       bool
@@ -20,7 +27,7 @@ type storageServer struct {
 	port         int
 	nodeID       uint32
 	nodePosition uint32
-	servers      []storagerpc.Node
+	servers      []Nodes
 
 	ready   chan struct{}
 	isReady bool
@@ -98,6 +105,7 @@ func (ss *storageServer) RegisterServer(args *storagerpc.RegisterArgs, reply *st
 	if len(ss.servers) == ss.numNodes-1 {
 		reply.Status = storagerpc.Ok
 		reply.Servers = ss.servers
+		sort.Sort(Nodes(reply.Servers))
 	} else {
 		reply.Status = storagerpc.NotReady
 	}

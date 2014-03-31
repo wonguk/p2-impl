@@ -3,9 +3,11 @@ package libstore
 import (
 	"errors"
 	"net/rpc"
+	"sort"
 
 	"github.com/cmu440/tribbler/rpc/librpc"
 	"github.com/cmu440/tribbler/rpc/storagerpc"
+	"github.com/cmu440/tribbler/storageserver"
 )
 
 type libstore struct {
@@ -18,12 +20,6 @@ type libstore struct {
 	queryMaster *queryMaster
 	cacheMaster *cacheMaster
 }
-
-type Nodes []storagerpc.Node
-
-func (n Nodes) Len() int           { return len(n) }
-func (n Nodes) Swap(i, j int)      { n[i], n[j] = n[j], n[i] }
-func (n Nodes) Less(i, j int) bool { return n[i].NodeID < a[j].NodeID }
 
 // NewLibstore creates a new instance of a TribServer's libstore. masterServerHostPort
 // is the master storage server's host:port. myHostPort is this Libstore's host:port
@@ -104,7 +100,7 @@ func NewLibstore(masterServerHostPort, myHostPort string, mode LeaseMode) (Libst
 			continue
 		}
 
-		sort.Sort(Nodes(reply.Servers))
+		sort.Sort(storageserver.Nodes(reply.Servers))
 		ls.storageservers = reply.Servers
 
 		return ls, nil
