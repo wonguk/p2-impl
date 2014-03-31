@@ -7,15 +7,20 @@ import (
 
 	"github.com/cmu440/tribbler/rpc/librpc"
 	"github.com/cmu440/tribbler/rpc/storagerpc"
-	"github.com/cmu440/tribbler/storageserver"
 )
+
+type Nodes []storagerpc.Node
+
+func (n Nodes) Len() int           { return len(n) }
+func (n Nodes) Swap(i, j int)      { n[i], n[j] = n[j], n[i] }
+func (n Nodes) Less(i, j int) bool { return n[i].NodeID < n[j].NodeID }
 
 type libstore struct {
 	mode         LeaseMode
 	masterServer string
 	hostport     string
 
-	storageservers []storagerpc.Node
+	storageservers []Nodes
 
 	queryMaster *queryMaster
 	cacheMaster *cacheMaster
