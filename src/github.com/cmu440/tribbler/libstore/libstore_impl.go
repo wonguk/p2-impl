@@ -74,9 +74,7 @@ func NewLibstore(masterServerHostPort, myHostPort string, mode LeaseMode) (Libst
 	ls.queryMaster = qm
 	ls.cacheMaster = cm
 
-	//TODO Get storage server addresses, and sort them by NodeID
-
-	//As seen on piazza in "p2:Golan RPC"
+	//Get storage server addresses, and sort them by NodeID
 
 	client, err := rpc.DialHTTP("tcp", masterServerHostPort) //This should attempt to make contact with the master storage server
 
@@ -125,7 +123,7 @@ func (ls *libstore) Get(key string) (string, error) {
 	}
 
 	// Make rpc call to storage server
-	client, err := rpc.DialHTTP("tcp", ls.hostport)
+	client, err := rpc.DialHTTP("tcp", getStorageServer(key))
 	if err != nil {
 		return "", err
 	}
@@ -162,7 +160,7 @@ func (ls *libstore) Get(key string) (string, error) {
 }
 
 func (ls *libstore) Put(key, value string) error {
-	client, err := rpc.DialHTTP("tcp", ls.hostport)
+	client, err := rpc.DialHTTP("tcp", getStorageServer(key))
 	if err != nil {
 		return err
 	}
@@ -212,7 +210,7 @@ func (ls *libstore) GetList(key string) ([]string, error) {
 	}
 
 	// Make rpc call to storage server
-	client, err := rpc.DialHTTP("tcp", ls.hostport)
+	client, err := rpc.DialHTTP("tcp", getStorageServer(key))
 	if err != nil {
 		return "", err
 	}
@@ -249,7 +247,7 @@ func (ls *libstore) GetList(key string) ([]string, error) {
 }
 
 func (ls *libstore) RemoveFromList(key, removeItem string) error {
-	client, err := rpc.DialHTTP("tcp", ls.hostport)
+	client, err := rpc.DialHTTP("tcp", getStorageServer(key))
 	if err != nil {
 		return err
 	}
@@ -284,7 +282,7 @@ func (ls *libstore) RemoveFromList(key, removeItem string) error {
 }
 
 func (ls *libstore) AppendToList(key, newItem string) error {
-	client, err := rpc.DialHTTP("tcp", ls.hostport)
+	client, err := rpc.DialHTTP("tcp", getStorageServer(key))
 	if err != nil {
 		return err
 	}
@@ -336,7 +334,7 @@ func (ls *libstore) RevokeLease(args *storagerpc.RevokeLeaseArgs, reply *storage
 }
 
 // Given the key, figures out the address of the relevant storage server
-func (ls *libstore) getStorateServer(key string) string {
+func (ls *libstore) getStorageServer(key string) string {
 	hash := StireHash(key)
 
 	return ls.storageservers[hash%len(ls.storageservers)]
