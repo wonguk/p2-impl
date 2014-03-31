@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/rpc"
 	"sort"
+	"time"
 
 	"github.com/cmu440/tribbler/rpc/librpc"
 	"github.com/cmu440/tribbler/rpc/storagerpc"
@@ -95,15 +96,15 @@ func NewLibstore(masterServerHostPort, myHostPort string, mode LeaseMode) (Libst
 			return nil, errors.New("could not make call with to storage server")
 		}
 
-		if reply.Status != storagerpc.OK {
-			continue
+		if reply.Status == storagerpc.OK {
+			sort.Sort(Nodes(reply.Servers))
+			ls.storageservers = reply.Servers
+
+			rpc.RegisterName("LeaseCallbacks", librpc.Wrap(ls))
+			return ls, nil
 		}
 
-		sort.Sort(Nodes(reply.Servers))
-		ls.storageservers = reply.Servers
-
-		rpc.RegisterName("LeaseCallbacks", librpc.Wrap(ls))
-		return ls, nil
+		time.Sleep(1 * time.Second)
 	}
 
 	return nil, errors.New("failed to connect to storage server 5 times")
