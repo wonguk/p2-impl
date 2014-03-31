@@ -19,6 +19,12 @@ type libstore struct {
 	cacheMaster *cacheMaster
 }
 
+type Nodes []storagerpc.Node
+
+func (n Nodes) Len() int           { return len(n) }
+func (n Nodes) Swap(i, j int)      { n[i], n[j] = n[j], n[i] }
+func (n Nodes) Less(i, j int) bool { return n[i].NodeID < a[j].NodeID }
+
 // NewLibstore creates a new instance of a TribServer's libstore. masterServerHostPort
 // is the master storage server's host:port. myHostPort is this Libstore's host:port
 // (i.e. the callback address that the storage servers should use to send back
@@ -73,49 +79,38 @@ func NewLibstore(masterServerHostPort, myHostPort string, mode LeaseMode) (Libst
 	ls.cacheMaster = cm
 
 	//TODO Get storage server addresses, and sort them by NodeID
-	
+
 	//As seen on piazza in "p2:Golan RPC"
 
-	client,err := rpc.DialHTTP("tcp",masterServerHostPort) //This should attempt to make contact with the master storage server
+	client, err := rpc.DialHTTP("tcp", masterServerHostPort) //This should attempt to make contact with the master storage server
 
 	if err != nil {
-		return nil,errors.New("Could not connect to Storage Server")
+		return nil, errors.New("Could not connect to Storage Server")
 	}
 
-	StorageArgs := new(storagerpc.GetServersArgs) //It's an empty struct
-	StorageReply := new(storagerpc.GetServersReply)
+	args := new(storagerpc.GetServersArgs) //It's an empty struct
+	reply := new(storagerpc.GetServersReply)
 
-	err = client.Call("GetServers",&StorageArgs,&StorageReply) //Make an rpc to the master server for the other nodes
+	ok := false
 
-	if err != nil { //If the call failed then return an error
-		return nil,errors.New("Could not make call with to Storage Server")
-	}
+	for i := 0; !ok && (i < 5); i++ {
+		err = client.Call("GetServers", args, reply) //Make an rpc to the master server for the other nodes
 
-	//Not we organize the array of nodes to be sorted
-		//Note: We might want to change this to be done as added as this takes alot of ops
-
-	//Get a list of the client IDs from all the nodes
-	ServerList := StorageReply.Servers
-	IndexList := make([]uint32,len(ServerList))
-	for index := 0; index < len(ServerCopy); index ++ {
-		NodeCopy := ServerList[index]
-		IndexList[index] = NodeCopy.NodeID
-	}
-	IndexList.sort() //Sort the UserID's
-
-	ServerList = make([]storagerpc.Node,len(StorageReply.Servers)) //Set ServerList to be a new empty array of same size
-	for ListIndex := 0; ListIndex < len(IndexList); ListIndex++ { //The index of the sorted list
-		for ServerIndex := 0 ; ServerIndex < len(IndexList); ServerList++ {
-			NodeCopy := ServerList[index]
-			if NodeCopy.NodeID == ListIndex[ListIndex] { //This is assuming the NodeID are generic
-				ServerList[ListIndex] = NodeCopy
-			}
+		if err != nil { //If the call failed then return an error
+			return nil, errors.New("could not make call with to storage server")
 		}
+
+		if reply.Status != storagerpc.OK {
+			continue
+		}
+
+		sort.Sort(Nodes(reply.Servers))
+		ls.storageservers = reply.Servers
+
+		return ls, nil
 	}
 
-	ls.storageservers = ServerList
-	
-	return ls
+	return nil, errors.New("failed to connect to storage server 5 times")
 }
 
 func (ls *libstore) Get(key string) (string, error) {
