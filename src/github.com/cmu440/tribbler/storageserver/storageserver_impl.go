@@ -5,7 +5,9 @@ import (
 	"net"
 	"net/http"
 	"net/rpc"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -33,8 +35,8 @@ type storageServer struct {
 	ready   chan struct{}
 	isReady bool
 
-	nodeHandlers map[string]chan *cmd
-	nodeBalChan  chan *cmd
+	nodeHandlers map[string]chan command
+	nodeBalChan  chan command
 }
 
 // NewStorageServer creates and starts a new StorageServer. masterServerHostPort
@@ -54,19 +56,35 @@ func NewStorageServer(masterServerHostPort string, numNodes, port int, nodeID ui
 		ss.master = false
 	}
 
-	ss.masterLock = &sync.Mutex{}
+	hostname, err := os.Hostname()
+	if err != nil {
+		return nil, err
+	}
+
+	hostport := hostname + ":" + strconv.Itoa(port)
+
+	ss.masterLock = sync.Mutex{}
 	ss.masterAddr = masterServerHostPort
 	ss.numNodes = numNodes
 	ss.port = port
 	ss.nodeID = nodeID
-	ss.nodeHandlers = make(map[string]chan *cmd)
-	ss.nodeBalChan = make(chan *cmd)
+	ss.servers = Nodes{
+		storagerpc.Node{
+			HostPort: hostport,
+			NodeID:   nodeID,
+		},
+	}
+
+	ss.ready = make(chan struct{})
+
+	ss.nodeHandlers = make(map[string]chan command)
+	ss.nodeBalChan = make(chan command)
 
 	rpc.RegisterName("StorageServer", ss)
 	rpc.HandleHTTP()
-	l, e := net.Listen("tcp", ":"+port)
+	l, e := net.Listen("tcp", ":"+strconv.Itoa(port))
 	if e != nil {
-		return nil, errors.New("error listening to port", port)
+		return nil, errors.New("error listening to port" + strconv.Itoa(port))
 	}
 	go http.Serve(l, nil)
 
@@ -79,8 +97,8 @@ func NewStorageServer(masterServerHostPort string, numNodes, port int, nodeID ui
 		}
 
 		args := storagerpc.RegisterArgs{
-			ServerInfo: Node{
-				HostPort: port,
+			ServerInfo: storagerpc.Node{
+				HostPort: hostport,
 				NodeID:   nodeID,
 			},
 		}
@@ -96,6 +114,13 @@ func NewStorageServer(masterServerHostPort string, numNodes, port int, nodeID ui
 			if reply.Status == storagerpc.OK {
 				ss.servers = reply.Servers
 				sort.Sort(Nodes(ss.servers))
+
+				for i, node := range ss.servers {
+					if node.NodeID == ss.nodeID {
+						ss.nodePosition = uint32(i)
+						break
+					}
+				}
 				break
 			}
 
@@ -117,28 +142,32 @@ func (ss *storageServer) RegisterServer(args *storagerpc.RegisterArgs, reply *st
 	defer ss.masterLock.Unlock()
 
 	if len(ss.servers) == ss.numNodes-1 {
-		reply.Status = storagerpc.Ok
+		reply.Status = storagerpc.OK
 		reply.Servers = ss.servers
 		return nil
 	}
 
 	for _, node := range ss.servers {
 		if node.NodeID == args.ServerInfo.NodeID {
-			reply.Status = storagerpc.NotReay
+			reply.Status = storagerpc.NotReady
 			return nil
 		}
 	}
 
-	if len(ss.servers) == ss.numNodes-1 {
-		return errors.New("already have all the slave servers online")
-	}
-
-	ss.servers = append(ss.servers, args.SerferInfo)
+	ss.servers = append(ss.servers, args.ServerInfo)
 
 	if len(ss.servers) == ss.numNodes-1 {
-		reply.Status = storagerpc.Ok
+		reply.Status = storagerpc.OK
 		reply.Servers = ss.servers
 		sort.Sort(Nodes(reply.Servers))
+
+		for i, node := range ss.servers {
+			if node.NodeID == ss.nodeID {
+				ss.nodePosition = uint32(i)
+			}
+		}
+
+		close(ss.ready)
 	} else {
 		reply.Status = storagerpc.NotReady
 	}
@@ -152,14 +181,7 @@ func (ss *storageServer) GetServers(args *storagerpc.GetServersArgs, reply *stor
 		return nil
 	}
 
-	key := strings.Split(args.Key, ":")[0]
-
-	if !ss.isKeyOkay(key) {
-		reply.Status = storagerpc.WrongServer
-		return nil
-	}
-
-	reply.Status = storagerpc.Ok
+	reply.Status = storagerpc.OK
 	reply.Servers = ss.servers
 
 	return nil
@@ -179,9 +201,9 @@ func (ss *storageServer) Get(args *storagerpc.GetArgs, reply *storagerpc.GetRepl
 	}
 
 	resultChan := make(chan error)
-	c := getCmd{args, reply, resultChan}
+	gc := getCmd{args, reply, resultChan}
 
-	ss.nodeBalChan <- c
+	ss.nodeBalChan <- &gc
 
 	return <-resultChan
 }
@@ -200,9 +222,9 @@ func (ss *storageServer) GetList(args *storagerpc.GetArgs, reply *storagerpc.Get
 	}
 
 	resultChan := make(chan error)
-	c := getListCmd{args, reply, resultChan}
+	glc := getListCmd{args, reply, resultChan}
 
-	ss.nodeBalChan <- c
+	ss.nodeBalChan <- &glc
 
 	return <-resultChan
 }
@@ -221,9 +243,9 @@ func (ss *storageServer) Put(args *storagerpc.PutArgs, reply *storagerpc.PutRepl
 	}
 
 	resultChan := make(chan error)
-	c := putCmd{args, reply, resultChan}
+	pc := putCmd{args, reply, resultChan}
 
-	ss.nodeBalChan <- c
+	ss.nodeBalChan <- &pc
 
 	return <-resultChan
 }
@@ -242,9 +264,9 @@ func (ss *storageServer) AppendToList(args *storagerpc.PutArgs, reply *storagerp
 	}
 
 	resultChan := make(chan error)
-	c := appendCmd{args, reply, resultChan}
+	ac := appendCmd{args, reply, resultChan}
 
-	ss.nodeBalChan <- c
+	ss.nodeBalChan <- &ac
 
 	return <-resultChan
 }
@@ -263,9 +285,9 @@ func (ss *storageServer) RemoveFromList(args *storagerpc.PutArgs, reply *storage
 	}
 
 	resultChan := make(chan error)
-	c := removeCmd{args, reply, resultChan}
+	rc := removeCmd{args, reply, resultChan}
 
-	ss.nodeBalChan <- c
+	ss.nodeBalChan <- &rc
 
 	return <-resultChan
 }
@@ -275,36 +297,24 @@ func (ss *storageServer) nodeBalancer() {
 	for {
 		select {
 		case c := <-ss.nodeBalChan:
-			key := c.args.Key
+			key := c.getKey()
 			nodeChan, ok := ss.nodeHandlers[key]
 
-			if !ok && c.args.(type) == *storagerpc.GetArgs {
-				c.reply.Status = storagerpc.ItemNotFound
-				break
+			if ok {
+				nodeChan <- c
+			} else {
+				nc := c.init()
+				if nc != nil {
+					ss.nodeHandlers[key] = nc
+				}
 			}
-
-			if !ok {
-				sn := new(storageNode)
-
-				sn.data = make(map[string]string)
-				sn.listData = make(map[string][]string)
-				sn.leases = make([]string)
-				sn.commands = make(chan *cmd)
-
-				go sn.handleNode()
-
-				ss.nodeHandlers[key] = sn
-				nodeChan = sn
-			}
-
-			nodeChan <- c
 		}
 	}
 }
 
 // Checks whether the given key is at the correct server
 func (ss *storageServer) isKeyOkay(key string) bool {
-	hash = libstore.StoreHash(key)
+	hash := libstore.StoreHash(key)
 
-	return ss.nodePosition == (hash % ss.numNodes)
+	return ss.nodePosition == (hash % uint32(ss.numNodes))
 }

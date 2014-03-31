@@ -1,8 +1,13 @@
 package storageserver
 
-import "time"
+import (
+	"net/rpc"
+	"time"
 
-func leaseMaster(key string, add chan string, revoke, done chan struct{}) {
+	"github.com/cmu440/tribbler/rpc/storagerpc"
+)
+
+func leaseMaster(key string, add chan string, revoke, done chan bool) {
 	leases := make(map[int]chan bool)
 	back := make(chan int)
 	leaseMap := make(map[string]int)
@@ -13,7 +18,7 @@ func leaseMaster(key string, add chan string, revoke, done chan struct{}) {
 		// StructureNode tells leaseMaster to revoke leases
 		case <-revoke:
 			if len(leases) == 0 {
-				done <- nil
+				done <- true
 				break
 			}
 
@@ -28,7 +33,7 @@ func leaseMaster(key string, add chan string, revoke, done chan struct{}) {
 				delete(leases, l)
 
 				if len(leases) == 0 {
-					done <- nil
+					done <- true
 					break
 				}
 			}
@@ -59,18 +64,18 @@ func leaseMaster(key string, add chan string, revoke, done chan struct{}) {
 }
 
 func leaseHandler(lease, key string, i int, kill chan bool, back chan int) {
-	d := structurerpc.LeaseSeconds + structurerpc.LeaseGuardSeconds
+	d := storagerpc.LeaseSeconds + storagerpc.LeaseGuardSeconds
 
 	epoch := time.NewTimer(time.Duration(d) * time.Second)
 	for {
 		select {
 		case <-kill:
-			libst, err := rpc.DialHttp("tcp", lease)
+			libst, err := rpc.DialHTTP("tcp", lease)
 			if err != nil {
 				//TODO Log
 			}
-			args := &RevokeLeaseArgs{key}
-			var reply RevokeLeaseReply
+			args := &storagerpc.RevokeLeaseArgs{key}
+			var reply storagerpc.RevokeLeaseReply
 
 			err = libst.Call("RemoteLeaqseCallbacks.RevokeLease", args, &reply)
 			if err != nil {
