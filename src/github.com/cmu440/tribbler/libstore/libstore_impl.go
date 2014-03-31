@@ -88,9 +88,7 @@ func NewLibstore(masterServerHostPort, myHostPort string, mode LeaseMode) (Libst
 	args := new(storagerpc.GetServersArgs) //It's an empty struct
 	reply := new(storagerpc.GetServersReply)
 
-	ok := false
-
-	for i := 0; !ok && (i < 5); i++ {
+	for i := 0; i < 5; i++ {
 		err = client.Call("GetServers", args, reply) //Make an rpc to the master server for the other nodes
 
 		if err != nil { //If the call failed then return an error
