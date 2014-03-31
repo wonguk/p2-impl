@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cmu440/tribbler/libstore"
 	"github.com/cmu440/tribbler/rpc/storagerpc"
@@ -27,7 +28,7 @@ type storageServer struct {
 	port         int
 	nodeID       uint32
 	nodePosition uint32
-	servers      []Nodes
+	servers      Nodes
 
 	ready   chan struct{}
 	isReady bool
@@ -69,10 +70,42 @@ func NewStorageServer(masterServerHostPort string, numNodes, port int, nodeID ui
 	}
 	go http.Serve(l, nil)
 
-	<-ss.ready
+	if ss.master {
+		<-ss.ready
+	} else {
+		client, err := rpc.DialHTTP("tcp", masterServerHostPort)
+		if err != nil {
+			return nil, err
+		}
+
+		args := storagerpc.RegisterArgs{
+			ServerInfo: Node{
+				HostPort: port,
+				NodeID:   nodeID,
+			},
+		}
+		var reply storagerpc.RegisterReply
+
+		for {
+			err = client.Call("RegisterServer", &args, &reply)
+
+			if err != nil {
+				return nil, err
+			}
+
+			if reply.Status == storagerpc.OK {
+				ss.servers = reply.Servers
+				sort.Sort(Nodes(ss.servers))
+				break
+			}
+
+			time.Sleep(1 * time.Second)
+		}
+	}
+
 	ss.isReady = true
 
-	return nil
+	return ss, nil
 }
 
 func (ss *storageServer) RegisterServer(args *storagerpc.RegisterArgs, reply *storagerpc.RegisterReply) error {
