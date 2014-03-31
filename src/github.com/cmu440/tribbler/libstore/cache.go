@@ -22,7 +22,7 @@ type cacheCell struct {
 }
 
 type cacheMaster struct {
-	cacheMap        map[string]chan *cacheRequest
+	cacheMap        map[string]chan *cacheCell
 	cacheChan       chan *cacheRequest
 	newCacheChan    chan *cacheCell
 	delCacheChan    chan string
@@ -91,13 +91,11 @@ type revokeRequest struct {
 // 7) if Lease, then send it to Cache Master
 
 func (cm *cacheMaster) startCacheMaster() {
-	cm.cacheMap = make(map[string]*cacheCell)
-
 	for {
 		select {
 		case req := <-cm.cacheChan:
-			if cache, ok := cm.cacheMap[req.key]; ok {
-				cache <- req
+			if c, ok := cm.cacheMap[req.key]; ok {
+				c.reqChan <- req
 			} else {
 				req.cache <- nil
 			}

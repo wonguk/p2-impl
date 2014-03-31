@@ -103,7 +103,7 @@ func NewLibstore(masterServerHostPort, myHostPort string, mode LeaseMode) (Libst
 			continue
 		}
 
-		sort.Sort(storageserver.Nodes(reply.Servers))
+		sort.Sort(Nodes(reply.Servers))
 		ls.storageservers = reply.Servers
 
 		return ls, nil
