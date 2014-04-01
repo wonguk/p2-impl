@@ -1,15 +1,19 @@
 package tribserver
 
 import (
-	"Time"
+	"time"
 	"net"
 	"net/rpc"
+	"net/http"
 	"sort"
 	"strconv"
+	"errors"
+	"strings"
+	//"math"
 
 	"github.com/cmu440/tribbler/libstore"
 	"github.com/cmu440/tribbler/rpc/tribrpc"
-	"github.com/cmu440/tribbler/tribclient"
+	//"github.com/cmu440/tribbler/tribclient"
 )
 
 type tribbleUser struct {
@@ -38,23 +42,28 @@ func NewTribServer(masterServerHostPort, myHostPort string) (TribServer, error) 
 		return nil, err
 	}
 
-	ts.Clients = make(map[tribclient.tribClient]tribbleUser)
-	ts.Lib = libstore.NewLibstore(masterServerHostPort, myHostPort, libstore.Normal)
+	ts.Clients = make(map[string]tribbleUser)
+	ts.Lib,err = libstore.NewLibstore(masterServerHostPort, myHostPort, libstore.Normal)
 
-	err = rpc.RegisterName("TribServer", tribrpc.Wrap(tribServer))
+	if err != nil {
+		return nil, err
+	}
+
+	err = rpc.RegisterName("TribServer", tribrpc.Wrap(ts))
 	if err != nil {
 		return nil, err
 	}
 
 	rpc.HandleHTTP()
-	go httpe.Serve(listener, nil)
+	go http.Serve(listener, nil)
 
 	return ts, nil
 }
 
 func (ts *tribServer) CreateUser(args *tribrpc.CreateUserArgs, reply *tribrpc.CreateUserReply) error {
 	//What do we do with reply?
-	_, err := libstore.Get(args.UserID) //Want to set that this err should be tribrps.Exists
+
+	_, err := ts.Lib.Get(args.UserID) //Want to set that this err should be tribrps.Exists
 	if err != nil {
 		reply.Status = tribrpc.Exists
 		return err
@@ -63,107 +72,123 @@ func (ts *tribServer) CreateUser(args *tribrpc.CreateUserArgs, reply *tribrpc.Cr
 	User := new(tribbleUser)
 	User.ID = args.UserID
 
-	_, err := Put(args.UserID, 0) //Make sure type is right
-	ts.Clients[User.ID] = User
+	err = ts.Lib.Put(args.UserID, "0") //Make sure type is right
+	ts.Clients[User.ID] = *User
 	reply.Status = tribrpc.OK
 	return nil
 }
 
 func (ts *tribServer) AddSubscription(args *tribrpc.SubscriptionArgs, reply *tribrpc.SubscriptionReply) error {
-	_, err := libstore.Get(args.UserID)
+	_, err := ts.Lib.Get(args.UserID)
 	if err != nil {
 		reply.Status = tribrpc.NoSuchUser
 		return err
 	}
 
-	_, err := libstore.Get(args.TargetUserID)
+	_, err = ts.Lib.Get(args.UserID)
 	if err != nil {
 		reply.Status = tribrpc.NoSuchTargetUser
 		return err
 	}
 
-	libstore.AppendToList(args.UserID+":Sub", args.TargetUserID)
+	ts.Lib.AppendToList(args.UserID+":Sub", args.TargetUserID)
 	reply.Status = tribrpc.OK
 	return nil
 }
 
 func (ts *tribServer) RemoveSubscription(args *tribrpc.SubscriptionArgs, reply *tribrpc.SubscriptionReply) error {
-	_, err := libstore.Get(args.UserID)
+	_, err := ts.Lib.Get(args.UserID)
 	if err != nil {
 		reply.Status = tribrpc.NoSuchUser
 		return err
 	}
 
-	_, err := libstore.Get(args.TargetUserID)
+	_, err = ts.Lib.Get(args.TargetUserID)
 	if err != nil {
 		reply.Status = tribrpc.NoSuchTargetUser
 		return err
 	}
 
-	libstore.RemoveFromList(args.UserID+":Sub", args.TargetUserID)
+	ts.Lib.RemoveFromList(args.UserID+":Sub", args.TargetUserID)
 	reply.Status = tribrpc.OK
 	return nil
 }
 
 func (ts *tribServer) GetSubscriptions(args *tribrpc.GetSubscriptionsArgs, reply *tribrpc.GetSubscriptionsReply) error {
-
-	if ts.Clients[args.UserID] == nil {
+	UserCheck := ts.Clients[args.UserID]
+	if (UserCheck.ID == "") {
 		reply.Status = tribrpc.NoSuchUser
-		return error.new("Not yet a User")
+		return errors.New("Not yet a User")
 	}
 
-	SubCopy, err := libstore.Get(args.UserID + ":Sub")
+	SubCopy, err := ts.Lib.Get(args.UserID + ":Sub")
 	if err != nil {
 		reply.Status = tribrpc.NoSuchUser
 		return err
 	}
 
 	reply.Status = tribrpc.OK
-	reply.UserIDs = SubCopy
+	reply.UserIDs = strings.Split(SubCopy,":") //Split the string into an array based on :
 	return nil
 
 }
 
 func (ts *tribServer) PostTribble(args *tribrpc.PostTribbleArgs, reply *tribrpc.PostTribbleReply) error {
 
-	if ts.Clients[args.UserID] == nil {
+	UserCheck := ts.Clients[args.UserID]
+	if (UserCheck.ID == "") {
 		reply.Status = tribrpc.NoSuchUser
-		return error.new("Not yet a User")
+		return errors.New("Not yet a User")
 	}
 
-	TimeNow := Time.Now()
+	TimeNow := time.Now()
 	TimeUnix := TimeNow.Unix()
-	TimeString, _ := strconv.ItoA(TimeUnix)
+	TimeString := strconv.Itoa(TimeUnix)
 	TribString := args.UserID + ":" + TimeString
 	reply.Status = tribrpc.OK
-	libstore.Put(TribString, args.Contents)
-	libstore.AppendToList(args.UserID+":"+"TimeStamps", TimeString)
+	ts.Lib.Put(TribString, args.Contents)
+	ts.Lib.AppendToList(args.UserID+":"+"TimeStamps", TimeString)
 
 	return nil
 }
 
 func (ts *tribServer) GetTribbles(args *tribrpc.GetTribblesArgs, reply *tribrpc.GetTribblesReply) error {
-	if ts.Clients[args.UserID] == nil {
+	
+	UserCheck := ts.Clients[args.UserID]
+	if (UserCheck.ID == "") {
 		reply.Status = tribrpc.NoSuchUser
-		return _, error.new("Not yet a User")
+		return errors.New("Not yet a User")
 	}
 
-	LibList := libstore.GetList(args.UserID + ":" + "TimeStamps") //Expect a list of timestamps
+	LibList,err := ts.Lib.GetList(args.UserID + ":" + "TimeStamps") //Expect a list of timestamps
+	if err != nil {
+		reply.Status = tribrpc.NoSuchUser
+		return err
+	}
+
 	TimeInt := make([]uint64, len(LibList))
 
 	for index := 0; index < len(LibList); index++ {
-		TimeInt[index] = strconv.Atoi(LibList[index])
+		TimeInt[index],err = strconv.Atoi(LibList[index])
+		if err != nil {
+			reply.Status = tribrpc.NoSuchUser
+			return err
+		}
 	}
 	sort.Ints(TimeInt)
-
-	loopTarget = min(100, len(LibList))
-	TribList := make([loopTarget]tribrpc.Tribbles)
-	for index = 0; index < loopTarger; index++ {
-		Trib := new(tribrpc.Tribbles)
+	var loopTarget int 
+	if (100 > len(LibList)){
+		loopTarget = len(LibList)
+	} else {
+		loopTarget = 100
+	}
+	TribList := make([]tribrpc.Tribble,loopTarget)
+	for index := 0; index < loopTarget; index++ {
+		Trib := new(tribrpc.Tribble)
 		Trib.UserID = args.UserID
-		Trib.Contents, _ = libstore.Get(args.UserID + ":" + strconv.ItoA(TimeInt[index]))
-		Trib.Posted = Time.Unix(TimeInt[index])
-		TribList[index] = Trib
+		Trib.Contents, _ = ts.Lib.Get(args.UserID + ":" + strconv.Itoa(TimeInt[index]))
+		Trib.Posted = time.Unix(TimeInt[index],0)
+		TribList[index] = *Trib
 	}
 	reply.Status = tribrpc.OK
 	reply.Tribbles = TribList
@@ -171,21 +196,26 @@ func (ts *tribServer) GetTribbles(args *tribrpc.GetTribblesArgs, reply *tribrpc.
 }
 
 func (ts *tribServer) GetTribblesBySubscription(args *tribrpc.GetTribblesArgs, reply *tribrpc.GetTribblesReply) error {
-	if ts.Clients[args.UserID] == nil {
+	UserCheck := ts.Clients[args.UserID]
+	if (UserCheck.ID == "") {
 		reply.Status = tribrpc.NoSuchUser
-		return _, error.new("Not yet a User")
+		return errors.New("Not yet a User")
 	}
 
-	UserLibList, _ := libstore.GetList(args.UserID + ":" + "TimeStamps") //Expect a list of timestamps (might want to include sub))
-	SubCopy, err := libstore.Get(args.UserID + ":Sub")
+	UserLibList, _ := ts.Lib.GetList(args.UserID + ":" + "TimeStamps") //Expect a list of timestamps (might want to include sub))
+	SubList, err := ts.Lib.GetList(args.UserID + ":Sub")
 	if err != nil {
 		reply.Status = tribrpc.NoSuchUser
 		return err
 	}
 
 	FullList := UserLibList
-	for index := 0; index < len(SubCopy); index++ {
-		SubLibList := libstore.GetList(SubCopy[index] + ":" + "TimeStamps")
+	for index := 0; index < len(SubList); index++ {
+		SubLibList,errLoop := ts.Lib.GetList(SubList[index] + ":" + "TimeStamps")
+		if errLoop != nil {
+			reply.Status = tribrpc.NoSuchTargetUser  
+			return errLoop
+		}
 		TempList := make([]string, len(UserLibList)+len(SubLibList))
 		for index := 0; index < len(FullList); index++ {
 			TempList[index] = FullList[index]
@@ -195,21 +225,30 @@ func (ts *tribServer) GetTribblesBySubscription(args *tribrpc.GetTribblesArgs, r
 		}
 		FullList = TempList
 	}
-	TimeInt := make([]uint64, len(LibList))
+	
+	TimeInt := make([]uint64, len(UserLibList))
 
 	for index := 0; index < len(FullList); index++ {
-		TimeInt[index] = strconv.Atoi(FullList[index])
+		TimeInt[index],err = strconv.Atoi(FullList[index])
+		if err != nil {
+			return err
+		}
 	}
 	sort.Ints(TimeInt)
 
-	loopTarget = min(100, len(LibList))
-	TribList := make([loopTarget]tribrpc.Tribbles)
-	for index = 0; index < loopTarger; index++ {
-		Trib := new(tribrpc.Tribbles)
+	var loopTarget int 
+	if (100 > len(UserLibList)){
+		loopTarget = len(UserLibList)
+	} else {
+		loopTarget = 100
+	}
+	TribList := make([]tribrpc.Tribble,loopTarget)
+	for index := 0; index < loopTarget; index++ {
+		Trib := new(tribrpc.Tribble)
 		Trib.UserID = args.UserID
-		Trib.Contents, _ = libstore.Get(args.UserID + ":" + strconv.ItoA(TimeInt[index]))
-		Trib.Posted = Time.Unix(TimeInt[index])
-		TribList[index] = Trib
+		Trib.Contents, _ = ts.Lib.Get(args.UserID + ":" + strconv.Itoa(TimeInt[index]))
+		Trib.Posted = time.Unix(TimeInt[index],0)
+		TribList[index] = *Trib
 	}
 	reply.Status = tribrpc.OK
 	reply.Tribbles = TribList
