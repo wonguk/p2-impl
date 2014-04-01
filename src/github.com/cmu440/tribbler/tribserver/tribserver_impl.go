@@ -1,14 +1,14 @@
 package tribserver
 
 import (
-	"time"
+	"errors"
 	"net"
-	"net/rpc"
 	"net/http"
+	"net/rpc"
 	"sort"
 	"strconv"
-	"errors"
 	"strings"
+	"time"
 	//"math"
 
 	"github.com/cmu440/tribbler/libstore"
@@ -27,9 +27,9 @@ type tribServer struct {
 }
 
 //This is here so we can sort arrays of int64
-type LongArray struct{
+type LongArray struct {
 	Array []int64
-	}
+}
 
 func (a LongArray) Len() int           { return len(a.Array) }
 func (a LongArray) Swap(i, j int)      { a.Array[i], a.Array[j] = a.Array[j], a.Array[i] }
@@ -51,7 +51,7 @@ func NewTribServer(masterServerHostPort, myHostPort string) (TribServer, error) 
 	}
 
 	ts.Clients = make(map[string]tribbleUser)
-	ts.Lib,err = libstore.NewLibstore(masterServerHostPort, myHostPort, libstore.Normal)
+	ts.Lib, err = libstore.NewLibstore(masterServerHostPort, myHostPort, libstore.Normal)
 
 	if err != nil {
 		return nil, err
@@ -124,7 +124,7 @@ func (ts *tribServer) RemoveSubscription(args *tribrpc.SubscriptionArgs, reply *
 
 func (ts *tribServer) GetSubscriptions(args *tribrpc.GetSubscriptionsArgs, reply *tribrpc.GetSubscriptionsReply) error {
 	UserCheck := ts.Clients[args.UserID]
-	if (UserCheck.ID == "") {
+	if UserCheck.ID == "" {
 		reply.Status = tribrpc.NoSuchUser
 		return errors.New("Not yet a User")
 	}
@@ -136,7 +136,7 @@ func (ts *tribServer) GetSubscriptions(args *tribrpc.GetSubscriptionsArgs, reply
 	}
 
 	reply.Status = tribrpc.OK
-	reply.UserIDs = strings.Split(SubCopy,":") //Split the string into an array based on :
+	reply.UserIDs = strings.Split(SubCopy, ":") //Split the string into an array based on :
 	return nil
 
 }
@@ -144,14 +144,14 @@ func (ts *tribServer) GetSubscriptions(args *tribrpc.GetSubscriptionsArgs, reply
 func (ts *tribServer) PostTribble(args *tribrpc.PostTribbleArgs, reply *tribrpc.PostTribbleReply) error {
 
 	UserCheck := ts.Clients[args.UserID]
-	if (UserCheck.ID == "") {
+	if UserCheck.ID == "" {
 		reply.Status = tribrpc.NoSuchUser
 		return errors.New("Not yet a User")
 	}
 
 	TimeNow := time.Now()
 	TimeUnix := TimeNow.Unix()
-	TimeString := strconv.FormatInt(TimeUnix,10)
+	TimeString := strconv.FormatInt(TimeUnix, 10)
 	TribString := args.UserID + ":" + TimeString
 	reply.Status = tribrpc.OK
 	ts.Lib.Put(TribString, args.Contents)
@@ -161,14 +161,14 @@ func (ts *tribServer) PostTribble(args *tribrpc.PostTribbleArgs, reply *tribrpc.
 }
 
 func (ts *tribServer) GetTribbles(args *tribrpc.GetTribblesArgs, reply *tribrpc.GetTribblesReply) error {
-	
+
 	UserCheck := ts.Clients[args.UserID]
-	if (UserCheck.ID == "") {
+	if UserCheck.ID == "" {
 		reply.Status = tribrpc.NoSuchUser
 		return errors.New("Not yet a User")
 	}
 
-	LibList,err := ts.Lib.GetList(args.UserID + ":" + "TimeStamps") //Expect a list of timestamps
+	LibList, err := ts.Lib.GetList(args.UserID + ":" + "TimeStamps") //Expect a list of timestamps
 	if err != nil {
 		reply.Status = tribrpc.NoSuchUser
 		return err
@@ -177,7 +177,7 @@ func (ts *tribServer) GetTribbles(args *tribrpc.GetTribblesArgs, reply *tribrpc.
 	TimeInt := make([]int64, len(LibList))
 
 	for index := 0; index < len(LibList); index++ {
-		TimeInt[index],err = strconv.ParseInt(LibList[index],10,64)
+		TimeInt[index], err = strconv.ParseInt(LibList[index], 10, 64)
 		if err != nil {
 			reply.Status = tribrpc.NoSuchUser
 			return err
@@ -188,18 +188,18 @@ func (ts *tribServer) GetTribbles(args *tribrpc.GetTribblesArgs, reply *tribrpc.
 	LongArrayTest.Array = TimeInt
 	sort.Sort(LongArrayTest)
 	TimeInt = LongArrayTest.Array
-	var loopTarget int 
-	if (100 > len(LibList)){
+	var loopTarget int
+	if 100 > len(LibList) {
 		loopTarget = len(LibList)
 	} else {
 		loopTarget = 100
 	}
-	TribList := make([]tribrpc.Tribble,loopTarget)
+	TribList := make([]tribrpc.Tribble, loopTarget)
 	for index := 0; index < loopTarget; index++ {
 		Trib := new(tribrpc.Tribble)
 		Trib.UserID = args.UserID
-		Trib.Contents, _ = ts.Lib.Get(args.UserID + ":" + strconv.FormatInt(TimeInt[index],10))
-		Trib.Posted = time.Unix(TimeInt[index],0)
+		Trib.Contents, _ = ts.Lib.Get(args.UserID + ":" + strconv.FormatInt(TimeInt[index], 10))
+		Trib.Posted = time.Unix(TimeInt[index], 0)
 		TribList[index] = *Trib
 	}
 	reply.Status = tribrpc.OK
@@ -209,7 +209,7 @@ func (ts *tribServer) GetTribbles(args *tribrpc.GetTribblesArgs, reply *tribrpc.
 
 func (ts *tribServer) GetTribblesBySubscription(args *tribrpc.GetTribblesArgs, reply *tribrpc.GetTribblesReply) error {
 	UserCheck := ts.Clients[args.UserID]
-	if (UserCheck.ID == "") {
+	if UserCheck.ID == "" {
 		reply.Status = tribrpc.NoSuchUser
 		return errors.New("Not yet a User")
 	}
@@ -223,9 +223,9 @@ func (ts *tribServer) GetTribblesBySubscription(args *tribrpc.GetTribblesArgs, r
 
 	FullList := UserLibList
 	for index := 0; index < len(SubList); index++ {
-		SubLibList,errLoop := ts.Lib.GetList(SubList[index] + ":" + "TimeStamps")
+		SubLibList, errLoop := ts.Lib.GetList(SubList[index] + ":" + "TimeStamps")
 		if errLoop != nil {
-			reply.Status = tribrpc.NoSuchTargetUser  
+			reply.Status = tribrpc.NoSuchTargetUser
 			return errLoop
 		}
 		TempList := make([]string, len(UserLibList)+len(SubLibList))
@@ -237,30 +237,30 @@ func (ts *tribServer) GetTribblesBySubscription(args *tribrpc.GetTribblesArgs, r
 		}
 		FullList = TempList
 	}
-	
+
 	TimeInt := make([]int64, len(UserLibList))
 
 	for index := 0; index < len(FullList); index++ {
-		TimeInt[index],_ = strconv.ParseInt(FullList[index],10,64)
+		TimeInt[index], _ = strconv.ParseInt(FullList[index], 10, 64)
 	}
-	
+
 	LongArrayTest := new(LongArray)
 	LongArrayTest.Array = TimeInt
 	sort.Sort(LongArrayTest)
 	TimeInt = LongArrayTest.Array
 
-	var loopTarget int 
-	if (100 > len(UserLibList)){
+	var loopTarget int
+	if 100 > len(UserLibList) {
 		loopTarget = len(UserLibList)
 	} else {
 		loopTarget = 100
 	}
-	TribList := make([]tribrpc.Tribble,loopTarget)
+	TribList := make([]tribrpc.Tribble, loopTarget)
 	for index := 0; index < loopTarget; index++ {
 		Trib := new(tribrpc.Tribble)
 		Trib.UserID = args.UserID
-		Trib.Contents, _ = ts.Lib.Get(args.UserID + ":" + strconv.FormatInt(TimeInt[index],10))
-		Trib.Posted = time.Unix(TimeInt[index],0)
+		Trib.Contents, _ = ts.Lib.Get(args.UserID + ":" + strconv.FormatInt(TimeInt[index], 10))
+		Trib.Posted = time.Unix(TimeInt[index], 0)
 		TribList[index] = *Trib
 	}
 	reply.Status = tribrpc.OK
