@@ -1,8 +1,9 @@
 package libstore
 
 import (
-	"github.com/cmu440/tribbler/rpc/storagerpc"
 	"time"
+
+	"github.com/cmu440/tribbler/rpc/storagerpc"
 )
 
 type valueType bool
