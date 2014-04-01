@@ -24,8 +24,16 @@ type tribServer struct {
 	Clients map[string]tribbleUser //As seen in figure 1 a TribServer must be able to handle multiple TribClients
 	Lib     libstore.Libstore
 	//Might want to store stuff here depending on Libstore
-
 }
+
+//This is here so we can sort arrays of int64
+type LongArray struct{
+	Array []int64
+	}
+
+func (a LongArray) Len() int           { return len(a.Array) }
+func (a LongArray) Swap(i, j int)      { a.Array[i], a.Array[j] = a.Array[j], a.Array[i] }
+func (a LongArray) Less(i, j int) bool { return a.Array[i] < a.Array[j] }
 
 // NewTribServer creates, starts and returns a new TribServer. masterServerHostPort
 // is the master storage server's host:port and port is this port number on which
@@ -143,7 +151,7 @@ func (ts *tribServer) PostTribble(args *tribrpc.PostTribbleArgs, reply *tribrpc.
 
 	TimeNow := time.Now()
 	TimeUnix := TimeNow.Unix()
-	TimeString := strconv.Itoa(TimeUnix)
+	TimeString := strconv.FormatInt(TimeUnix,10)
 	TribString := args.UserID + ":" + TimeString
 	reply.Status = tribrpc.OK
 	ts.Lib.Put(TribString, args.Contents)
@@ -166,16 +174,20 @@ func (ts *tribServer) GetTribbles(args *tribrpc.GetTribblesArgs, reply *tribrpc.
 		return err
 	}
 
-	TimeInt := make([]uint64, len(LibList))
+	TimeInt := make([]int64, len(LibList))
 
 	for index := 0; index < len(LibList); index++ {
-		TimeInt[index],err = strconv.Atoi(LibList[index])
+		TimeInt[index],err = strconv.ParseInt(LibList[index],10,64)
 		if err != nil {
 			reply.Status = tribrpc.NoSuchUser
 			return err
 		}
 	}
-	sort.Ints(TimeInt)
+
+	LongArrayTest := new(LongArray)
+	LongArrayTest.Array = TimeInt
+	sort.Sort(LongArrayTest)
+	TimeInt = LongArrayTest.Array
 	var loopTarget int 
 	if (100 > len(LibList)){
 		loopTarget = len(LibList)
@@ -186,7 +198,7 @@ func (ts *tribServer) GetTribbles(args *tribrpc.GetTribblesArgs, reply *tribrpc.
 	for index := 0; index < loopTarget; index++ {
 		Trib := new(tribrpc.Tribble)
 		Trib.UserID = args.UserID
-		Trib.Contents, _ = ts.Lib.Get(args.UserID + ":" + strconv.Itoa(TimeInt[index]))
+		Trib.Contents, _ = ts.Lib.Get(args.UserID + ":" + strconv.FormatInt(TimeInt[index],10))
 		Trib.Posted = time.Unix(TimeInt[index],0)
 		TribList[index] = *Trib
 	}
@@ -226,15 +238,16 @@ func (ts *tribServer) GetTribblesBySubscription(args *tribrpc.GetTribblesArgs, r
 		FullList = TempList
 	}
 	
-	TimeInt := make([]uint64, len(UserLibList))
+	TimeInt := make([]int64, len(UserLibList))
 
 	for index := 0; index < len(FullList); index++ {
-		TimeInt[index],err = strconv.Atoi(FullList[index])
-		if err != nil {
-			return err
-		}
+		TimeInt[index],_ = strconv.ParseInt(FullList[index],10,64)
 	}
-	sort.Ints(TimeInt)
+	
+	LongArrayTest := new(LongArray)
+	LongArrayTest.Array = TimeInt
+	sort.Sort(LongArrayTest)
+	TimeInt = LongArrayTest.Array
 
 	var loopTarget int 
 	if (100 > len(UserLibList)){
@@ -246,7 +259,7 @@ func (ts *tribServer) GetTribblesBySubscription(args *tribrpc.GetTribblesArgs, r
 	for index := 0; index < loopTarget; index++ {
 		Trib := new(tribrpc.Tribble)
 		Trib.UserID = args.UserID
-		Trib.Contents, _ = ts.Lib.Get(args.UserID + ":" + strconv.Itoa(TimeInt[index]))
+		Trib.Contents, _ = ts.Lib.Get(args.UserID + ":" + strconv.FormatInt(TimeInt[index],10))
 		Trib.Posted = time.Unix(TimeInt[index],0)
 		TribList[index] = *Trib
 	}
