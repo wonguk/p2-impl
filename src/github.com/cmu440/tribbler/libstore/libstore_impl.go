@@ -59,6 +59,7 @@ type libstore struct {
 // need to create a brand new HTTP handler to serve the requests (the Libstore may
 // simply reuse the TribServer's HTTP handler since the two run in the same process).
 func NewLibstore(masterServerHostPort, myHostPort string, mode LeaseMode) (Libstore, error) {
+	LOGV.Println("[LIB]", "NewLibstore:", "Initializing....")
 	ls := new(libstore)
 
 	ls.mode = mode
@@ -90,6 +91,7 @@ func NewLibstore(masterServerHostPort, myHostPort string, mode LeaseMode) (Libst
 	client, err := rpc.DialHTTP("tcp", masterServerHostPort) //This should attempt to make contact with the master storage server
 
 	if err != nil {
+		LOGE.Println("[LIB]", "NewLibstore:", "Failed to connect to storage server", err)
 		return nil, errors.New("Could not connect to Storage Server")
 	}
 	defer client.Close()
@@ -101,10 +103,12 @@ func NewLibstore(masterServerHostPort, myHostPort string, mode LeaseMode) (Libst
 		err = client.Call("StorageServer.GetServers", args, reply) //Make an rpc to the master server for the other nodes
 
 		if err != nil { //If the call failed then return an error
-			return nil, err //errors.New("could not make call with to storage server")
+			LOGE.Println("[LIB]", "NewLibstore:", "Error calling GetServers", err)
+			return nil, err
 		}
 
 		if reply.Status == storagerpc.OK {
+			LOGV.Println("[LIB]", "NewLibstore:", "Recieved list of servers")
 			sort.Sort(Nodes(reply.Servers))
 			ls.storageservers = reply.Servers
 
@@ -112,12 +116,14 @@ func NewLibstore(masterServerHostPort, myHostPort string, mode LeaseMode) (Libst
 
 			err = ls.initStorageClients()
 
+			LOGV.Println("[LIB]", "NewLibstore:", "Done!")
 			return ls, err
 		}
 
 		time.Sleep(1 * time.Second)
 	}
 
+	LOGE.Println("[LIB]", "NewLibstore:", "failed to connect to server 5 times")
 	return nil, errors.New("failed to connect to storage server 5 times")
 }
 
@@ -153,7 +159,7 @@ func (ls *libstore) Get(key string) (string, error) {
 	case storagerpc.OK:
 		LOGV.Println("[LIB]", "Get:", "(OK)", key, reply.Value)
 		if reply.Lease.Granted {
-			LOGV.Println("[LIB]", "Get:", "(OK)", "got lease")
+			LOGV.Println("[LIB]", "Get:", "(OK)", "got lease", key, reply.Value)
 			ls.addToCache(key, reply.Value, nil, reply.Lease.ValidSeconds)
 		}
 
@@ -249,29 +255,30 @@ func (ls *libstore) GetList(key string) ([]string, error) {
 	// If recieved lease, store to cache
 	switch reply.Status {
 	case storagerpc.OK:
-		LOGV.Println("[LIB]")
+		LOGV.Println("[LIB]", "GetList:", "(OK)", key, reply.Value)
 		if reply.Lease.Granted {
+			LOGV.Println("[LIB]", "GetList:", "(OK)", "got lease", key, reply.Value)
 			ls.addToCache(key, "", reply.Value, reply.Lease.ValidSeconds)
 		}
 
 		return reply.Value, nil
 	case storagerpc.KeyNotFound:
-		LOGV.Println("[LIB]")
+		LOGE.Println("[LIB]", "GetList:", "(KeyNotFound)", key)
 		return nil, errors.New("key not found")
 	case storagerpc.ItemNotFound:
-		LOGV.Println("[LIB]")
+		LOGE.Println("[LIB]", "GetList:", "(ItemNotFound)", key)
 		return nil, errors.New("item not found")
 	case storagerpc.WrongServer:
-		LOGV.Println("[LIB]")
+		LOGE.Println("[LIB]", "GetList:", "(WrongServer)", key)
 		return nil, errors.New("wrong server")
 	case storagerpc.ItemExists:
-		LOGV.Println("[LIB]")
+		LOGE.Println("[LIB]", "GetList:", "(ItemExists)", key)
 		return nil, errors.New("items exist")
 	case storagerpc.NotReady:
-		LOGV.Println("[LIB]")
+		LOGE.Println("[LIB]", "GetList:", "(NotReady)", key)
 		return nil, errors.New("not ready")
 	default:
-		LOGV.Println("[LIB]")
+		LOGE.Println("[LIB]", "GetList:", "invalid status", key)
 		return nil, errors.New("invalid status")
 	}
 }
@@ -293,25 +300,25 @@ func (ls *libstore) RemoveFromList(key, removeItem string) error {
 
 	switch reply.Status {
 	case storagerpc.OK:
-		LOGV.Println("[LIB]")
+		LOGV.Println("[LIB]", "RemoveFromList:", "(OK)", key, removeItem)
 		return nil
 	case storagerpc.KeyNotFound:
-		LOGV.Println("[LIB]")
+		LOGE.Println("[LIB]", "RemoveFromList:", "(KeyNotFound)", key, removeItem)
 		return errors.New("key not found")
 	case storagerpc.ItemNotFound:
-		LOGV.Println("[LIB]")
+		LOGE.Println("[LIB]", "RemoveFromList:", "(ItemNotFound)", key, removeItem)
 		return errors.New("item not found")
 	case storagerpc.WrongServer:
-		LOGV.Println("[LIB]")
+		LOGE.Println("[LIB]", "RemoveFromList:", "(WrongServer)", key, removeItem)
 		return errors.New("wrong server")
 	case storagerpc.ItemExists:
-		LOGV.Println("[LIB]")
+		LOGE.Println("[LIB]", "RemoveFromList:", "(ItemExists)", key, removeItem)
 		return errors.New("items exist")
 	case storagerpc.NotReady:
-		LOGV.Println("[LIB]")
+		LOGE.Println("[LIB]", "RemoveFromList:", "(NotReady)", key, removeItem)
 		return errors.New("not ready")
 	default:
-		LOGV.Println("[LIB]")
+		LOGE.Println("[LIB]", "RemoveFromList:", "invalid status", key, removeItem)
 		return errors.New("invalid status")
 	}
 }
@@ -333,25 +340,25 @@ func (ls *libstore) AppendToList(key, newItem string) error {
 
 	switch reply.Status {
 	case storagerpc.OK:
-		LOGV.Println("[LIB]")
+		LOGV.Println("[LIB]", "AppendToList:", "(OK)", key, newItem)
 		return nil
 	case storagerpc.KeyNotFound:
-		LOGV.Println("[LIB]")
+		LOGE.Println("[LIB]", "AppendToList:", "(KeyNotFound)", key, newItem)
 		return errors.New("key not found")
 	case storagerpc.ItemNotFound:
-		LOGV.Println("[LIB]")
+		LOGE.Println("[LIB]", "AppendToList:", "(ItemNotFound)", key, newItem)
 		return errors.New("item not found")
 	case storagerpc.WrongServer:
-		LOGV.Println("[LIB]")
+		LOGE.Println("[LIB]", "AppendToList:", "(WrongServer)", key, newItem)
 		return errors.New("wrong server")
 	case storagerpc.ItemExists:
-		LOGV.Println("[LIB]")
+		LOGE.Println("[LIB]", "AppendToList:", "(ItemExists)", key, newItem)
 		return errors.New("items exist")
 	case storagerpc.NotReady:
-		LOGV.Println("[LIB]")
+		LOGE.Println("[LIB]", "AppendToList:", "(NotReady)", key, newItem)
 		return errors.New("not ready")
 	default:
-		LOGV.Println("[LIB]")
+		LOGE.Println("[LIB]", "AppendToList:", "invalid status", key, newItem)
 		return errors.New("invalid status")
 	}
 }
@@ -383,10 +390,14 @@ func (ls *libstore) getStorageClient(key string) *rpc.Client {
 
 	for i, s := range ls.storageservers {
 		if s.NodeID >= hash {
+			LOGV.Println("[LIB]", "getStorageClient:", "Routing to", s.NodeID)
+
 			return ls.storageclients[i]
 		}
 	}
 
+	LOGV.Println("[LIB]", "getStorageClient:", "Routing to",
+		ls.storageservers[0].NodeID)
 	return ls.storageclients[0]
 }
 
@@ -404,6 +415,7 @@ func (ls *libstore) requestLease(key string) bool {
 }
 
 func (ls *libstore) queryCache(key string) *cache {
+	LOGV.Println("[LIB]", "queryCache:", "Querying cache for", key)
 	cache := make(chan *cache)
 
 	request := cacheRequest{
@@ -416,6 +428,7 @@ func (ls *libstore) queryCache(key string) *cache {
 }
 
 func (ls *libstore) queryQuery(key string) bool {
+	LOGV.Println("[LIB]", "queryQuery:", "Querying lease for", key)
 	lease := make(chan bool)
 
 	request := queryRequest{
@@ -428,6 +441,7 @@ func (ls *libstore) queryQuery(key string) bool {
 }
 
 func (ls *libstore) addToCache(key, value string, listValue []string, duration int) {
+	LOGV.Println("[LIB]", "addToCache:", "Adding", key, "to cache")
 	cc := new(cacheCell)
 
 	cc.key = key
@@ -442,12 +456,15 @@ func (ls *libstore) addToCache(key, value string, listValue []string, duration i
 }
 
 func (ls *libstore) initStorageClients() error {
+	LOGV.Println("[LIB]", "initStorageClients:", "initializing clients...")
 	ls.storageclients = make([]*rpc.Client, len(ls.storageservers))
 
 	for i, node := range ls.storageservers {
 		client, err := rpc.DialHTTP("tcp", node.HostPort)
 
 		if err != nil {
+			LOGE.Println("[LIB]", "NewLibstore:", "Error initializing client",
+				node.NodeID, err)
 			return err
 		}
 
