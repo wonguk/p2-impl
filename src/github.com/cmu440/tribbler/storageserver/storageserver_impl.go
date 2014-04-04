@@ -80,7 +80,7 @@ func NewStorageServer(masterServerHostPort string, numNodes, port int, nodeID ui
 	ss.nodeHandlers = make(map[string]chan command)
 	ss.nodeBalChan = make(chan command)
 
-	rpc.RegisterName("StorageServer", ss)
+	rpc.RegisterName("RemoteStorageServer", ss)
 	rpc.HandleHTTP()
 	l, e := net.Listen("tcp", ":"+strconv.Itoa(port))
 	if e != nil {

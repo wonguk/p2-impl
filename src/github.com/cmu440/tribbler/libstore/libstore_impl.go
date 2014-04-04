@@ -22,6 +22,7 @@ type libstore struct {
 	hostport     string
 
 	storageservers Nodes
+	storageclients []*rpc.Client
 
 	queryMaster *queryMaster
 	cacheMaster *cacheMaster
@@ -79,21 +80,22 @@ func NewLibstore(masterServerHostPort, myHostPort string, mode LeaseMode) (Libst
 	ls.cacheMaster = cm
 
 	//Get storage server addresses, and sort them by NodeID
-
+	println("AAAAAAAA   " + masterServerHostPort)
 	client, err := rpc.DialHTTP("tcp", masterServerHostPort) //This should attempt to make contact with the master storage server
 
 	if err != nil {
 		return nil, errors.New("Could not connect to Storage Server")
 	}
+	defer client.Close()
 
 	args := new(storagerpc.GetServersArgs) //It's an empty struct
 	reply := new(storagerpc.GetServersReply)
 
 	for i := 0; i < 5; i++ {
-		err = client.Call("GetServers", args, reply) //Make an rpc to the master server for the other nodes
+		err = client.Call("StorageServer.GetServers", args, reply) //Make an rpc to the master server for the other nodes
 
 		if err != nil { //If the call failed then return an error
-			return nil, errors.New("could not make call with to storage server")
+			return nil, err //errors.New("could not make call with to storage server")
 		}
 
 		if reply.Status == storagerpc.OK {
@@ -101,7 +103,10 @@ func NewLibstore(masterServerHostPort, myHostPort string, mode LeaseMode) (Libst
 			ls.storageservers = reply.Servers
 
 			rpc.RegisterName("LeaseCallbacks", librpc.Wrap(ls))
-			return ls, nil
+
+			err = ls.initStorageClients()
+
+			return ls, err
 		}
 
 		time.Sleep(1 * time.Second)
@@ -126,14 +131,11 @@ func (ls *libstore) Get(key string) (string, error) {
 	}
 
 	// Make rpc call to storage server
-	client, err := rpc.DialHTTP("tcp", ls.getStorageServer(key))
-	if err != nil {
-		return "", err
-	}
+	client := ls.getStorageClient(key)
 
 	var reply storagerpc.GetReply
 
-	err = client.Call("RemoteStorageServer.Get", args, &reply)
+	err := client.Call("StorageServer.Get", args, &reply)
 
 	if err != nil {
 		return "", err
@@ -163,10 +165,7 @@ func (ls *libstore) Get(key string) (string, error) {
 }
 
 func (ls *libstore) Put(key, value string) error {
-	client, err := rpc.DialHTTP("tcp", ls.getStorageServer(key))
-	if err != nil {
-		return err
-	}
+	client := ls.getStorageClient(key)
 
 	args := storagerpc.PutArgs{
 		key, value,
@@ -174,7 +173,7 @@ func (ls *libstore) Put(key, value string) error {
 
 	var reply storagerpc.PutReply
 
-	err = client.Call("RemoteStorageServer.Put", args, &reply)
+	err := client.Call("StorageServer.Put", args, &reply)
 	if err != nil {
 		return err
 	}
@@ -213,14 +212,11 @@ func (ls *libstore) GetList(key string) ([]string, error) {
 	}
 
 	// Make rpc call to storage server
-	client, err := rpc.DialHTTP("tcp", ls.getStorageServer(key))
-	if err != nil {
-		return nil, err
-	}
+	client := ls.getStorageClient(key)
 
 	var reply storagerpc.GetListReply
 
-	err = client.Call("RemoteStorageServer.GetList", args, &reply)
+	err := client.Call("StorageServer.GetList", args, &reply)
 
 	if err != nil {
 		return nil, err
@@ -250,10 +246,7 @@ func (ls *libstore) GetList(key string) ([]string, error) {
 }
 
 func (ls *libstore) RemoveFromList(key, removeItem string) error {
-	client, err := rpc.DialHTTP("tcp", ls.getStorageServer(key))
-	if err != nil {
-		return err
-	}
+	client := ls.getStorageClient(key)
 
 	args := storagerpc.PutArgs{
 		key, removeItem,
@@ -261,7 +254,7 @@ func (ls *libstore) RemoveFromList(key, removeItem string) error {
 
 	var reply storagerpc.PutReply
 
-	err = client.Call("RemoteStorageServer.RemoveFromList", args, &reply)
+	err := client.Call("StorageServer.RemoveFromList", args, &reply)
 	if err != nil {
 		return err
 	}
@@ -285,10 +278,7 @@ func (ls *libstore) RemoveFromList(key, removeItem string) error {
 }
 
 func (ls *libstore) AppendToList(key, newItem string) error {
-	client, err := rpc.DialHTTP("tcp", ls.getStorageServer(key))
-	if err != nil {
-		return err
-	}
+	client := ls.getStorageClient(key)
 
 	args := storagerpc.PutArgs{
 		key, newItem,
@@ -296,7 +286,7 @@ func (ls *libstore) AppendToList(key, newItem string) error {
 
 	var reply storagerpc.PutReply
 
-	err = client.Call("RemoteStorageServer.AppendToList", args, &reply)
+	err := client.Call("StorageServer.AppendToList", args, &reply)
 	if err != nil {
 		return err
 	}
@@ -337,11 +327,11 @@ func (ls *libstore) RevokeLease(args *storagerpc.RevokeLeaseArgs, reply *storage
 }
 
 // Given the key, figures out the address of the relevant storage server
-func (ls *libstore) getStorageServer(key string) string {
+func (ls *libstore) getStorageClient(key string) *rpc.Client {
 	hash := StoreHash(key)
 	index := hash % uint32(len(ls.storageservers))
 
-	return ls.storageservers[index].HostPort
+	return ls.storageclients[index]
 }
 
 func (ls *libstore) requestLease(key string) bool {
@@ -393,4 +383,20 @@ func (ls *libstore) addToCache(key, value string, listValue []string, duration i
 	cc.delChan = make(chan struct{})
 
 	ls.cacheMaster.newCacheChan <- cc
+}
+
+func (ls *libstore) initStorageClients() error {
+	ls.storageclients = make([]*rpc.Client, len(ls.storageservers))
+
+	for i, node := range ls.storageservers {
+		client, err := rpc.DialHTTP("tcp", node.HostPort)
+
+		if err != nil {
+			return err
+		}
+
+		ls.storageclients[i] = client
+	}
+
+	return nil
 }
