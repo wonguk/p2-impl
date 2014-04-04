@@ -2,7 +2,10 @@ package libstore
 
 import (
 	"errors"
+	"io/ioutil"
+	"log"
 	"net/rpc"
+	"os"
 	"sort"
 	"time"
 
@@ -15,6 +18,9 @@ type Nodes []storagerpc.Node
 func (n Nodes) Len() int           { return len(n) }
 func (n Nodes) Swap(i, j int)      { n[i], n[j] = n[j], n[i] }
 func (n Nodes) Less(i, j int) bool { return n[i].NodeID < n[j].NodeID }
+
+var LOGE = log.New(os.Stderr, "ERROR ", log.Lmicroseconds|log.Lshortfile)
+var LOGV = log.New(ioutil.Discard, "VERBOSE ", log.Lmicroseconds|log.Lshortfile)
 
 type libstore struct {
 	mode         LeaseMode
@@ -72,6 +78,7 @@ func NewLibstore(masterServerHostPort, myHostPort string, mode LeaseMode) (Libst
 	cm.cacheMap = make(map[string]*cacheCell)
 	cm.cacheChan = make(chan *cacheRequest)
 	cm.newCacheChan = make(chan *cacheCell)
+	cm.revokeCacheChan = make(chan *revokeRequest)
 	cm.deleteCacheChan = make(chan string)
 
 	go cm.startCacheMaster()
@@ -310,16 +317,20 @@ func (ls *libstore) AppendToList(key, newItem string) error {
 }
 
 func (ls *libstore) RevokeLease(args *storagerpc.RevokeLeaseArgs, reply *storagerpc.RevokeLeaseReply) error {
+	LOGV.Println("[LIB]", "RevokeLease:", "recieved request to revoke", args.Key)
 	ok := make(chan bool)
 	req := revokeRequest{
 		args.Key, ok,
 	}
 
+	LOGV.Println("[LIB]", "RevokeLease:", "sending request to cacheMaster", args.Key)
 	ls.cacheMaster.revokeCacheChan <- &req
 
 	if <-ok {
+		LOGV.Println("[LIB]", "RevokeLease:", args.Key, "has been revoked")
 		reply.Status = storagerpc.OK
 	} else {
+		LOGV.Println("[LIB]", "RevokeLease:", args.Key, "was not found")
 		reply.Status = storagerpc.ItemNotFound
 	}
 

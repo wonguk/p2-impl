@@ -96,30 +96,46 @@ type revokeRequest struct {
 // 7) if Lease, then send it to Cache Master
 
 func (cm *cacheMaster) startCacheMaster() {
+	LOGV.Println("[LIB] CacheMaster: Starting...")
 	for {
+		LOGV.Println(
+			"[LIB] CacheMaster: There are",
+			len(cm.cacheMap),
+			"cache cells")
 		select {
 		case req := <-cm.cacheChan:
+			LOGV.Println("[LIB] CacheMaster: received cache request for ", req.key)
 			if c, ok := cm.cacheMap[req.key]; ok {
 				c.reqChan <- req
 			} else {
+				LOGV.Println("[LIB] CacheMaster: cache is not found for ", req.key)
 				req.cache <- nil
 			}
 		case newCache := <-cm.newCacheChan:
+			LOGV.Println("[LIB] CacheMaster: received new cache cell for",
+				newCache.key)
 			cm.cacheMap[newCache.key] = newCache
 			go newCache.cacheHandler(cm.deleteCacheChan)
 		case key := <-cm.deleteCacheChan:
+			LOGV.Println("[LIB] CacheMaster: recieved delete request for", key)
 			del, ok := cm.cacheMap[key]
 			if ok {
+				LOGV.Println("[LIB] CacheMaster: closing delChan for", key)
 				close(del.delChan)
 			}
+			LOGV.Println("[LIB] CacheMaster: removing from cachemap")
 			delete(cm.cacheMap, key)
 		case rev := <-cm.revokeCacheChan:
+			LOGV.Println("[LIB] CacheMaster: revoke request received for", rev.key)
 			c, ok := cm.cacheMap[rev.key]
 
 			if ok {
+				LOGV.Println("[LIB]", "CacheMaster:", "revoking cache cell for", rev.key)
 				rev.ok <- true
 				close(c.delChan)
+				delete(cm.cacheMap, rev.key)
 			} else {
+				LOGV.Println("[LIB]", "CacheMaster:", "cache cell to revoke not found")
 				rev.ok <- false
 			}
 		}
@@ -127,6 +143,7 @@ func (cm *cacheMaster) startCacheMaster() {
 }
 
 func (ch *cacheCell) cacheHandler(delCacheChan chan string) {
+	LOGV.Println("[LIB]", "CacheCell:", "cache cell initializing....", ch.key)
 	duration := time.Duration(ch.duration) * time.Second
 	epoch := time.NewTimer(duration)
 
@@ -139,14 +156,19 @@ func (ch *cacheCell) cacheHandler(delCacheChan chan string) {
 	for {
 		select {
 		case <-epoch.C:
+			LOGV.Println("[LIB]", "CacheCell:", "Lease Duration has ended for", ch.key)
 			delCacheChan <- ch.key
 			ch.valid = false
 		case <-ch.delChan:
+			LOGV.Println("[LIB]", "CacheCell:", "deleting cell for", ch.key)
 			return
 		case req := <-ch.reqChan:
+			LOGV.Println("[LIB]", "CacheCell:", "request recieved for", ch.key)
 			if ch.valid {
+				LOGV.Println("[LIB]", "CacheCell:", "sending cache for", ch.key)
 				req.cache <- &cache
 			} else {
+				LOGV.Println("[LIB]", "CacheCell:", "cache is invalid")
 				req.cache <- nil
 			}
 		}
@@ -154,17 +176,18 @@ func (ch *cacheCell) cacheHandler(delCacheChan chan string) {
 }
 
 func (qm *queryMaster) startQueryMaster() {
+	LOGV.Println("[LIB]", "QueryMaster", "Starting....")
 	for {
 		select {
 		case req := <-qm.queryChan:
+			LOGV.Println("[LIB]", "QueryMaster", "request recieved for", req.key)
 			query, ok := qm.queryMap[req.key]
 			if !ok {
+				LOGV.Println("[LIB]", "QueryMaster", "initializing query cell for", req.key)
 				query = new(queryCell)
 
-				qc := make(chan *queryRequest)
-				dc := make(chan struct{})
-				query.queryChan = qc
-				query.deleteChan = dc
+				query.queryChan = make(chan *queryRequest)
+				query.deleteChan = make(chan struct{})
 				query.key = req.key
 
 				qm.queryMap[req.key] = query
@@ -174,9 +197,11 @@ func (qm *queryMaster) startQueryMaster() {
 
 			query.queryChan <- req
 		case key := <-qm.deleteChan:
+			LOGV.Println("[LIB]", "QueryMaster", "delete request for", key)
 			q, ok := qm.queryMap[key]
 
 			if ok {
+				LOGV.Println("[LIB]", "QueryMaster", "closing delete chan for", key)
 				close(q.deleteChan)
 			}
 
@@ -186,23 +211,29 @@ func (qm *queryMaster) startQueryMaster() {
 }
 
 func (qc *queryCell) queryHandler(del chan string) {
+	LOGV.Println("[LIB]", "QueryCell", "Starting...")
 	duration := time.Duration(storagerpc.QueryCacheSeconds) * time.Second
 	epoch := time.NewTimer(duration)
 
 	for {
 		select {
 		case <-epoch.C:
+			LOGV.Println("[LIB]", "QueryCell", "Query Duration reached for", qc.key)
 			del <- qc.key
 		case req := <-qc.queryChan:
+			LOGV.Println("[LIB]", "QueryCell", "incrementing count for", qc.key)
 			qc.count++
 			if qc.count >= storagerpc.QueryCacheThresh {
+				LOGV.Println("[LIB]", "QueryCell", "count reached Threshold for", qc.key)
 				req.lease <- true
 
 				del <- qc.key
 			} else {
+				LOGV.Println("[LIB]", "QueryCell", "threshold not met", qc.count)
 				req.lease <- false
 			}
 		case <-qc.deleteChan:
+			LOGV.Println("[LIB]", "QueryCell", "deleting querycell for", qc.key)
 			return
 		}
 	}
