@@ -193,9 +193,7 @@ func (ss *storageServer) Get(args *storagerpc.GetArgs, reply *storagerpc.GetRepl
 		return nil
 	}
 
-	key := strings.Split(args.Key, ":")[0]
-
-	if !ss.isKeyOkay(key) {
+	if !ss.isKeyOkay(args.Key) {
 		reply.Status = storagerpc.WrongServer
 		return nil
 	}
@@ -214,9 +212,7 @@ func (ss *storageServer) GetList(args *storagerpc.GetArgs, reply *storagerpc.Get
 		return nil
 	}
 
-	key := strings.Split(args.Key, ":")[0]
-
-	if !ss.isKeyOkay(key) {
+	if !ss.isKeyOkay(args.Key) {
 		reply.Status = storagerpc.WrongServer
 		return nil
 	}
@@ -235,9 +231,7 @@ func (ss *storageServer) Put(args *storagerpc.PutArgs, reply *storagerpc.PutRepl
 		return nil
 	}
 
-	key := strings.Split(args.Key, ":")[0]
-
-	if !ss.isKeyOkay(key) {
+	if !ss.isKeyOkay(args.Key) {
 		reply.Status = storagerpc.WrongServer
 		return nil
 	}
@@ -256,9 +250,7 @@ func (ss *storageServer) AppendToList(args *storagerpc.PutArgs, reply *storagerp
 		return nil
 	}
 
-	key := strings.Split(args.Key, ":")[0]
-
-	if !ss.isKeyOkay(key) {
+	if !ss.isKeyOkay(args.Key) {
 		reply.Status = storagerpc.WrongServer
 		return nil
 	}
@@ -277,9 +269,7 @@ func (ss *storageServer) RemoveFromList(args *storagerpc.PutArgs, reply *storage
 		return nil
 	}
 
-	key := strings.Split(args.Key, ":")[0]
-
-	if !ss.isKeyOkay(key) {
+	if !ss.isKeyOkay(args.Key) {
 		reply.Status = storagerpc.WrongServer
 		return nil
 	}
@@ -314,7 +304,13 @@ func (ss *storageServer) nodeBalancer() {
 
 // Checks whether the given key is at the correct server
 func (ss *storageServer) isKeyOkay(key string) bool {
-	hash := libstore.StoreHash(key)
+	hash := libstore.StoreHash(strings.Split(key, ":")[0])
 
-	return ss.nodePosition == (hash % uint32(ss.numNodes))
+	for _, node := range ss.servers {
+		if node.NodeID >= hash {
+			return ss.nodeID == node.NodeID
+		}
+	}
+
+	return ss.nodeID == ss.servers[0].NodeID
 }
