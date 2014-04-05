@@ -39,11 +39,13 @@ type removeCmd struct {
 }
 
 func (c *getCmd) run(node *storageNode) {
+	LOGV.Println("GetCmd:", c.args.Key)
 	c.reply.Status = storagerpc.OK
 	c.reply.Value = node.data
 
 	// Lease
 	if c.args.WantLease {
+		LOGV.Println("GetCmd:", "Granting lease to", c.args.Key)
 		node.addLease <- c.args.HostPort
 		c.reply.Lease.Granted = true
 		c.reply.Lease.ValidSeconds = storagerpc.LeaseSeconds
@@ -53,7 +55,8 @@ func (c *getCmd) run(node *storageNode) {
 }
 
 func (c *getCmd) init() chan command {
-	c.reply.Status = storagerpc.ItemNotFound
+	LOGE.Println("GetCmd:", "Key not found", c.args.Key)
+	c.reply.Status = storagerpc.KeyNotFound
 	c.result <- nil
 
 	return nil
@@ -64,11 +67,13 @@ func (c *getCmd) getKey() string {
 }
 
 func (c *getListCmd) run(node *storageNode) {
+	LOGV.Println("GetListCmd:", c.args.Key)
 	c.reply.Status = storagerpc.OK
 	c.reply.Value = node.listData
 
 	// Lease
 	if c.args.WantLease {
+		LOGV.Println("GetListCmd:", "Granting lease to", c.args.Key)
 		node.addLease <- c.args.HostPort
 		c.reply.Lease.Granted = true
 		c.reply.Lease.ValidSeconds = storagerpc.LeaseSeconds
@@ -78,7 +83,8 @@ func (c *getListCmd) run(node *storageNode) {
 }
 
 func (c *getListCmd) init() chan command {
-	c.reply.Status = storagerpc.ItemNotFound
+	LOGE.Println("GetListCmd:", "Key not found", c.args.Key)
+	c.reply.Status = storagerpc.KeyNotFound
 	c.result <- nil
 
 	return nil
@@ -89,8 +95,12 @@ func (c *getListCmd) getKey() string {
 }
 
 func (c *putCmd) run(node *storageNode) {
+	LOGV.Println("PutCmd:", c.args.Key)
+
+	LOGV.Println("PutCmd:", "revoking leases...", c.args.Key)
 	node.revokeLease <- true
 	<-node.doneLease
+	LOGV.Println("PutCmd:", "leases revoked", c.args.Key)
 
 	node.data = c.args.Value
 	c.reply.Status = storagerpc.OK
@@ -99,6 +109,7 @@ func (c *putCmd) run(node *storageNode) {
 }
 
 func (c *putCmd) init() chan command {
+	LOGV.Println("PutCmd:", "Initializing storage node...", c.args.Key)
 	sn := new(storageNode)
 
 	sn.data = c.args.Value
@@ -121,15 +132,18 @@ func (c *putCmd) getKey() string {
 }
 
 func (c *appendCmd) run(node *storageNode) {
+	LOGV.Println("AppendCmd:", c.args.Key)
 	for _, d := range node.listData {
 		if d == c.args.Value {
 			c.reply.Status = storagerpc.ItemExists
 			c.result <- nil
 		}
 	}
-	//Lease
+
+	LOGV.Println("AppendCmd:", "revoking leases...", c.args.Key)
 	node.revokeLease <- true
 	<-node.doneLease
+	LOGV.Println("AppendCmd:", "leases revoked", c.args.Key)
 
 	node.listData = append(node.listData, c.args.Value)
 	c.reply.Status = storagerpc.OK
@@ -138,6 +152,7 @@ func (c *appendCmd) run(node *storageNode) {
 }
 
 func (c *appendCmd) init() chan command {
+	LOGV.Println("AppendCmd:", "Initializing storage node...", c.args.Key)
 	sn := new(storageNode)
 
 	sn.listData = []string{c.args.Value}
@@ -160,25 +175,35 @@ func (c *appendCmd) getKey() string {
 }
 
 func (c *removeCmd) run(node *storageNode) {
+	LOGV.Println("RemoveCmd:", c.args.Key)
+
+	LOGV.Println("RemoveCmd:", "Looking for", c.args.Value, c.args.Key)
 	for i := range node.listData {
 		if node.listData[i] == c.args.Value {
-			//Lease
+			LOGV.Println("RemoveCmd:", "Found Value!", c.args.Key)
+
+			LOGV.Println("RemoveCmd:", "revoking leases...", c.args.Key)
 			node.revokeLease <- true
 			<-node.doneLease
+			LOGV.Println("RemoveCmd:", "leases revoked", c.args.Key)
 
 			node.listData = append(node.listData[:i], node.listData[i+1:]...)
 
 			c.reply.Status = storagerpc.OK
 			c.result <- nil
+
+			return
 		}
 	}
 
+	LOGE.Println("RemoveCmd:", "Item Not Found")
 	c.reply.Status = storagerpc.ItemNotFound
 	c.result <- nil
 }
 
 func (c *removeCmd) init() chan command {
-	c.reply.Status = storagerpc.ItemNotFound
+	LOGE.Println("RemoveCmd:", "Key Not Found")
+	c.reply.Status = storagerpc.KeyNotFound
 	c.result <- nil
 
 	return nil

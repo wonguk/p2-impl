@@ -13,6 +13,7 @@ func (sn *storageNode) handleNode() {
 	for {
 		select {
 		case c := <-sn.commands:
+			LOGV.Println("StorageNode:", "Recieved Command!")
 			c.run(sn)
 		}
 	}
