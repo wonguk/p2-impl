@@ -286,9 +286,8 @@ func (ts *tribServer) GetTribbles(args *tribrpc.GetTribblesArgs, reply *tribrpc.
 			Trib := new(tribrpc.Tribble)
 			Trib.UserID = args.UserID
 			Trib.Contents, _ = ts.Lib.Get(args.UserID + ":" + strconv.FormatInt(TimeInt[index], 10))
-			Trib.Posted = time.Unix(TimeInt[index]/1000, TimeInt[index]%1000)
-			// fmt.Println("Got Trib:",Trib)
-			TribList[loopTarget-index-1] = *Trib
+			Trib.Posted = time.Unix(TimeInt[index]/1000000000, TimeInt[index]%1000000000)
+			TribList[len(TribList)-1-index] = *Trib
 		}
 		reply.Status = tribrpc.OK
 		reply.Tribbles = TribList
@@ -302,17 +301,12 @@ func (ts *tribServer) GetTribbles(args *tribrpc.GetTribblesArgs, reply *tribrpc.
 			ModPosition := len(LibList) - index - 1
 			ModPosition = index + (len(LibList) - 100)
 			Trib.Contents, _ = ts.Lib.Get(args.UserID + ":" + strconv.FormatInt(TimeInt[ModPosition], 10))
-			Trib.Posted = time.Unix(TimeInt[index]/1000, TimeInt[index]%1000)
+			Trib.Posted = time.Unix(TimeInt[index]/1000000000, TimeInt[index]%1000000000)
 			TribList[99-index] = *Trib
-		}
-		TribListTest := make([]tribrpc.Tribble, loopTarget)
-		for index := 0; index < 100; index++ {
-			//TribListTest[index] = TribList[99-index]
-			TribListTest[index] = TribList[index]
 		}
 
 		reply.Status = tribrpc.OK
-		reply.Tribbles = TribListTest
+		reply.Tribbles = TribList
 	}
 	LOGV.Println("Exiting Get Tribbles")
 	return nil
@@ -338,18 +332,14 @@ func (ts *tribServer) GetTribblesBySubscription(args *tribrpc.GetTribblesArgs, r
 
 	SubList, err := ts.Lib.GetList(args.UserID + ":Sub")
 	if err != nil {
-		reply.Status = tribrpc.NoSuchUser
+		reply.Status = tribrpc.OK
 		return nil
 	}
 
 	FullList := make(subTribs, 0)
 
 	for _, sub := range SubList {
-		SubLibList, errLoop := ts.Lib.GetList(sub + ":" + "TimeStamps")
-		if errLoop != nil {
-			reply.Status = tribrpc.NoSuchTargetUser
-			return nil
-		}
+		SubLibList,_ := ts.Lib.GetList(sub + ":" + "TimeStamps")
 
 		for _, t := range SubLibList {
 			time, _ := strconv.ParseInt(t, 10, 64)
@@ -372,7 +362,7 @@ func (ts *tribServer) GetTribblesBySubscription(args *tribrpc.GetTribblesArgs, r
 		Trib.UserID = FullList[index].user
 		timeStr := strconv.FormatInt(FullList[index].time, 10)
 		Trib.Contents, _ = ts.Lib.Get(FullList[index].user + ":" + timeStr)
-		Trib.Posted = time.Unix(FullList[index].time, 0)
+		Trib.Posted = time.Unix(FullList[index].time/1000000000, FullList[index].time%1000000000)
 		TribList[index] = *Trib
 	}
 	reply.Status = tribrpc.OK
