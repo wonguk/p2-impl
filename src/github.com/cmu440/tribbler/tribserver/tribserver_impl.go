@@ -134,7 +134,7 @@ func (ts *tribServer) AddSubscription(args *tribrpc.SubscriptionArgs, reply *tri
 	LOGV.Println("Calling AppendToList with UserID:", args.TargetUserID)
 	ts.Lib.AppendToList(args.UserID+":Sub", args.TargetUserID)
 	//PrintList,_ := ts.Lib.GetList(args.UserID+":Sub")
-	LOGV.Println("Checking list:", PrintList)
+	//LOGV.Println("Checking list:", PrintList)
 	reply.Status = tribrpc.OK
 	LOGV.Println("Exiting Add Subscription")
 	return nil
@@ -180,7 +180,7 @@ func (ts *tribServer) RemoveSubscription(args *tribrpc.SubscriptionArgs, reply *
 	LOGV.Println("Calling RemoveFromList with UserID:", args.TargetUserID)
 	ts.Lib.RemoveFromList(args.UserID+":Sub", args.TargetUserID)
 	//CheckList,_ := ts.Lib.GetList(args.UserID+":Sub")
-	LOGV.Println(CheckList)
+	//LOGV.Println(CheckList)
 	reply.Status = tribrpc.OK
 	LOGV.Println("Exiting Remove Subscriptions")
 	return nil
@@ -238,7 +238,7 @@ func (ts *tribServer) PostTribble(args *tribrpc.PostTribbleArgs, reply *tribrpc.
 	LOGV.Println("TimeString:", TimeString)
 	ts.Lib.AppendToList(args.UserID+":"+"TimeStamps", TimeString)
 	//TribTest,_ := ts.Lib.GetList(args.UserID+":"+"TimeStamps")
-	LOGV.Println("TribTest:", TribTest)
+	//LOGV.Println("TribTest:", TribTest)
 	LOGV.Println("Exiting Post Pribble")
 	return nil
 }
