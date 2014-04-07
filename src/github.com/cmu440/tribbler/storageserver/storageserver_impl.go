@@ -145,7 +145,8 @@ func NewStorageServer(masterServerHostPort string, numNodes, port int, nodeID ui
 
 			if err != nil {
 				LOGE.Println("Slave:", nodeID, "error registering to master", err)
-				return nil, err
+				time.Sleep(time.Second)
+				continue
 			}
 
 			if reply.Status == storagerpc.OK {
@@ -178,6 +179,7 @@ func (ss *storageServer) RegisterServer(args *storagerpc.RegisterArgs, reply *st
 	}
 
 	LOGV.Println("RegisterServer:", "registering", args.ServerInfo.NodeID)
+
 	ss.masterLock.Lock()
 	defer ss.masterLock.Unlock()
 

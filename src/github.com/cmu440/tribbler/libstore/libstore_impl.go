@@ -90,24 +90,26 @@ func NewLibstore(masterServerHostPort, myHostPort string, mode LeaseMode) (Libst
 	ls.queryMaster = qm
 	ls.cacheMaster = cm
 
-	//Get storage server addresses, and sort them by NodeID
-	client, err := rpc.DialHTTP("tcp", masterServerHostPort) //This should attempt to make contact with the master storage server
-
-	if err != nil {
-		LOGE.Println("[LIB]", "NewLibstore:", "Failed to connect to storage server", err)
-		return nil, errors.New("Could not connect to Storage Server")
-	}
-	defer client.Close()
-
 	args := new(storagerpc.GetServersArgs) //It's an empty struct
 	reply := new(storagerpc.GetServersReply)
 
 	for i := 0; i < 5; i++ {
+		//Get storage server addresses, and sort them by NodeID
+		client, err := rpc.DialHTTP("tcp", masterServerHostPort) //This should attempt to make contact with the master storage server
+
+		if err != nil {
+			LOGE.Println("[LIB]", "NewLibstore:", "Failed to connect to storage server", err)
+			time.Sleep(time.Second)
+			continue
+		}
+		defer client.Close()
+
 		err = client.Call("StorageServer.GetServers", args, reply) //Make an rpc to the master server for the other nodes
 
 		if err != nil { //If the call failed then return an error
 			LOGE.Println("[LIB]", "NewLibstore:", "Error calling GetServers", err)
-			return nil, err
+			time.Sleep(time.Second)
+			continue
 		}
 
 		if reply.Status == storagerpc.OK {
@@ -118,13 +120,11 @@ func NewLibstore(masterServerHostPort, myHostPort string, mode LeaseMode) (Libst
 
 			rpc.RegisterName("LeaseCallbacks", librpc.Wrap(ls))
 
-			//err = ls.initStorageClients()
-
 			LOGV.Println("[LIB]", "NewLibstore:", "Done!")
-			return ls, err
+			return ls, nil
 		}
 
-		time.Sleep(1 * time.Second)
+		time.Sleep(time.Second)
 	}
 
 	LOGE.Println("[LIB]", "NewLibstore:", "failed to connect to server 5 times")
