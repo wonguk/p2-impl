@@ -1,6 +1,10 @@
 package storageserver
 
-import "github.com/cmu440/tribbler/rpc/storagerpc"
+import (
+	"sync"
+
+	"github.com/cmu440/tribbler/rpc/storagerpc"
+)
 
 type command interface {
 	run(node *storageNode)
@@ -45,10 +49,18 @@ func (c *getCmd) run(node *storageNode) {
 
 	// Lease
 	if c.args.WantLease {
-		LOGV.Println("GetCmd:", "Granting lease to", c.args.Key)
-		node.addLease <- c.args.HostPort
-		c.reply.Lease.Granted = true
-		c.reply.Lease.ValidSeconds = storagerpc.LeaseSeconds
+		leaseReq := make(leaseRequest)
+		node.leaseRequest <- leaseReq
+
+		if <-leaseReq {
+			LOGV.Println("GetCmd:", "Granting lease to", c.args.Key)
+			node.addLease <- c.args.HostPort
+			c.reply.Lease.Granted = true
+			c.reply.Lease.ValidSeconds = storagerpc.LeaseSeconds
+		} else {
+			LOGV.Println("GetCmd:", "Node currently in use", c.args.Key)
+			c.reply.Lease.Granted = false
+		}
 	}
 
 	c.result <- nil
@@ -74,9 +86,16 @@ func (c *getListCmd) run(node *storageNode) {
 	// Lease
 	if c.args.WantLease {
 		LOGV.Println("GetListCmd:", "Granting lease to", c.args.Key)
-		node.addLease <- c.args.HostPort
-		c.reply.Lease.Granted = true
-		c.reply.Lease.ValidSeconds = storagerpc.LeaseSeconds
+		leaseReq := make(leaseRequest)
+		node.leaseRequest <- leaseReq
+
+		if <-leaseReq {
+			node.addLease <- c.args.HostPort
+			c.reply.Lease.Granted = true
+			c.reply.Lease.ValidSeconds = storagerpc.LeaseSeconds
+		} else {
+			c.reply.Lease.Granted = false
+		}
 	}
 
 	c.result <- nil
@@ -96,6 +115,8 @@ func (c *getListCmd) getKey() string {
 
 func (c *putCmd) run(node *storageNode) {
 	LOGV.Println("PutCmd:", c.args.Key)
+	node.putMutex.Lock()
+	defer node.putMutex.Unlock()
 
 	LOGV.Println("PutCmd:", "revoking leases...", c.args.Key)
 	node.revokeLease <- true
@@ -103,8 +124,9 @@ func (c *putCmd) run(node *storageNode) {
 	LOGV.Println("PutCmd:", "leases revoked", c.args.Key)
 
 	node.data = c.args.Value
-	c.reply.Status = storagerpc.OK
+	node.releaseLease <- true
 
+	c.reply.Status = storagerpc.OK
 	c.result <- nil
 }
 
@@ -115,11 +137,14 @@ func (c *putCmd) init() chan command {
 	sn.data = c.args.Value
 	sn.addLease = make(chan string)
 	sn.revokeLease = make(chan bool)
+	sn.releaseLease = make(chan bool)
+	sn.leaseRequest = make(chan leaseRequest)
 	sn.doneLease = make(chan bool)
 	sn.commands = make(chan command)
+	sn.putMutex = new(sync.Mutex)
 
 	go sn.handleNode()
-	go leaseMaster(c.args.Key, sn.addLease, sn.revokeLease, sn.doneLease)
+	go leaseMaster(c.args.Key, sn.addLease, sn.revokeLease, sn.doneLease, sn.releaseLease, sn.leaseRequest)
 
 	c.reply.Status = storagerpc.OK
 	c.result <- nil
@@ -133,10 +158,14 @@ func (c *putCmd) getKey() string {
 
 func (c *appendCmd) run(node *storageNode) {
 	LOGV.Println("AppendCmd:", c.args.Key)
+	node.putMutex.Lock()
+	defer node.putMutex.Unlock()
 	for _, d := range node.listData {
 		if d == c.args.Value {
+			LOGE.Println("AppendCmd:", c.args.Key, c.args.Value, "Item Exists!")
 			c.reply.Status = storagerpc.ItemExists
 			c.result <- nil
+			return
 		}
 	}
 
@@ -146,8 +175,9 @@ func (c *appendCmd) run(node *storageNode) {
 	LOGV.Println("AppendCmd:", "leases revoked", c.args.Key)
 
 	node.listData = append(node.listData, c.args.Value)
-	c.reply.Status = storagerpc.OK
+	node.releaseLease <- true
 
+	c.reply.Status = storagerpc.OK
 	c.result <- nil
 }
 
@@ -158,11 +188,14 @@ func (c *appendCmd) init() chan command {
 	sn.listData = []string{c.args.Value}
 	sn.addLease = make(chan string)
 	sn.revokeLease = make(chan bool)
+	sn.releaseLease = make(chan bool)
+	sn.leaseRequest = make(chan leaseRequest)
 	sn.doneLease = make(chan bool)
 	sn.commands = make(chan command)
+	sn.putMutex = new(sync.Mutex)
 
 	go sn.handleNode()
-	go leaseMaster(c.args.Key, sn.addLease, sn.revokeLease, sn.doneLease)
+	go leaseMaster(c.args.Key, sn.addLease, sn.revokeLease, sn.doneLease, sn.releaseLease, sn.leaseRequest)
 
 	c.reply.Status = storagerpc.OK
 	c.result <- nil
@@ -176,6 +209,8 @@ func (c *appendCmd) getKey() string {
 
 func (c *removeCmd) run(node *storageNode) {
 	LOGV.Println("RemoveCmd:", c.args.Key)
+	node.putMutex.Lock()
+	defer node.putMutex.Unlock()
 
 	LOGV.Println("RemoveCmd:", "Looking for", c.args.Value, c.args.Key)
 	for i := range node.listData {
@@ -188,6 +223,8 @@ func (c *removeCmd) run(node *storageNode) {
 			LOGV.Println("RemoveCmd:", "leases revoked", c.args.Key)
 
 			node.listData = append(node.listData[:i], node.listData[i+1:]...)
+
+			node.releaseLease <- true
 
 			c.reply.Status = storagerpc.OK
 			c.result <- nil

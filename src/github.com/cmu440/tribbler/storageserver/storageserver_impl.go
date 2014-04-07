@@ -2,7 +2,7 @@ package storageserver
 
 import (
 	"errors"
-	//"io/ioutil"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -24,12 +24,12 @@ func (n Nodes) Len() int           { return len(n) }
 func (n Nodes) Swap(i, j int)      { n[i], n[j] = n[j], n[i] }
 func (n Nodes) Less(i, j int) bool { return n[i].NodeID < n[j].NodeID }
 
-var logfile, _ = os.OpenFile("testlogfile", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+//var logfile, _ = os.OpenFile("testlogfile", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 
-var LOGE = log.New(logfile,
+var LOGE = log.New(ioutil.Discard,
 	"ERROR [StorageServer] ",
 	log.Lmicroseconds|log.Lshortfile)
-var LOGV = log.New(logfile,
+var LOGV = log.New(ioutil.Discard,
 	"VERBOSE [StorageServer] ",
 	log.Lmicroseconds|log.Lshortfile)
 
@@ -241,7 +241,11 @@ func (ss *storageServer) Get(args *storagerpc.GetArgs, reply *storagerpc.GetRepl
 
 	ss.nodeBalChan <- &gc
 
-	return <-resultChan
+	result := <-resultChan
+
+	LOGV.Println("Get:", ss.nodeID, "Done!, returning", args.Key, result)
+
+	return result
 }
 
 func (ss *storageServer) GetList(args *storagerpc.GetArgs, reply *storagerpc.GetListReply) error {
