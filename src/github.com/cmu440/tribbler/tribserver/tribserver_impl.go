@@ -1,21 +1,22 @@
 package tribserver
 
 import (
-	//"errors"
-	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"net/rpc"
+	//"os"
+	"io/ioutil"
 	"sort"
 	"strconv"
-	//"strings"
 	"time"
-	//"math"
 
 	"github.com/cmu440/tribbler/libstore"
 	"github.com/cmu440/tribbler/rpc/tribrpc"
-	//"github.com/cmu440/tribbler/tribclient"
 )
+
+var LOGE = log.New(ioutil.Discard, "ERROR ", log.Lmicroseconds|log.Lshortfile)
+var LOGV = log.New(ioutil.Discard, "VERBOSE ", log.Lmicroseconds|log.Lshortfile)
 
 type tribbleUser struct {
 	ID string
@@ -43,76 +44,76 @@ func (a LongArray) Less(i, j int) bool { return a.Array[i] < a.Array[j] }
 //
 // For hints on how to properly setup RPC, see the rpc/tribrpc package.
 func NewTribServer(masterServerHostPort, myHostPort string) (TribServer, error) {
-	//fmt.Println("Called newTribServer")
+	LOGV.Println("Called newTribServer")
 	ts := new(tribServer)
 
-	//fmt.Println("Attemping to listen to tcp:", myHostPort)
+	LOGV.Println("Attemping to listen to tcp:", myHostPort)
 	listener, err := net.Listen("tcp", myHostPort)
 	if err != nil {
-		fmt.Println("Failed to listen to tcp:", myHostPort)
+		LOGE.Println("Failed to listen to tcp:", myHostPort)
 		return nil, err
 	}
 
 	ts.Clients = make(map[string]tribbleUser)
-	//fmt.Println("Calling NewLibstore")
+	LOGV.Println("Calling NewLibstore")
 	ts.Lib, err = libstore.NewLibstore(masterServerHostPort, myHostPort, libstore.Normal)
 
 	if err != nil {
-		fmt.Println("Failed to call NewLibstore properly")
+		LOGE.Println("Failed to call NewLibstore properly")
 		return nil, err
 	}
 
-	//fmt.Println("Attempting to make an rpc call to RegisterName")
+	LOGV.Println("Attempting to make an rpc call to RegisterName")
 	err = rpc.RegisterName("TribServer", tribrpc.Wrap(ts))
 	if err != nil {
-		fmt.Println("Failed at making the rpc call")
+		LOGE.Println("Failed at making the rpc call")
 		return nil, err
 	}
 
-	//fmt.Println("Making a rpc call to HandleHTTP")
+	LOGV.Println("Making a rpc call to HandleHTTP")
 	rpc.HandleHTTP()
 
-	//fmt.Println("Spawing a new thread to handle http.Serve")
+	LOGV.Println("Spawing a new thread to handle http.Serve")
 	go http.Serve(listener, nil)
 
-	//fmt.Println("Exited NewTribServer")
+	LOGV.Println("Exited NewTribServer")
 	return ts, nil
 }
 
 func (ts *tribServer) CreateUser(args *tribrpc.CreateUserArgs, reply *tribrpc.CreateUserReply) error {
-	//fmt.Println("Called Create User")
+	LOGV.Println("Called Create User")
 
-	//fmt.Println("Attempting to call Lib.Get to see if there is a user:", args.UserID)
+	LOGV.Println("Attempting to call Lib.Get to see if there is a user:", args.UserID)
 	_, err := ts.Lib.Get(args.UserID) //Want to set that this err should be tribrps.Exists
 	if err == nil {
-		fmt.Println("Got an error from Lib.Get")
+		LOGE.Println("Got an error from Lib.Get")
 		reply.Status = tribrpc.Exists
 		return err
 	}
 
 	User := new(tribbleUser)
 	User.ID = args.UserID
-	//fmt.Println("Putting the userID into the lib server")
+	LOGV.Println("Putting the userID into the lib server")
 	err = ts.Lib.Put(args.UserID, "0") //Make sure type is right
-	//fmt.Println("Add the user to the list of clients and setting reply to have ok")
+	LOGV.Println("Add the user to the list of clients and setting reply to have ok")
 	ts.Clients[User.ID] = *User
 	reply.Status = tribrpc.OK
-	//fmt.Println("Exiting Create User")
+	LOGV.Println("Exiting Create User")
 	return nil
 }
 
 func (ts *tribServer) AddSubscription(args *tribrpc.SubscriptionArgs, reply *tribrpc.SubscriptionReply) error {
-	//fmt.Println("Calling Add Subscription", args)
+	LOGV.Println("Calling Add Subscription", args)
 
-	//fmt.Println("Calling Lib.Get with userID:", args.UserID)
+	LOGV.Println("Calling Lib.Get with userID:", args.UserID)
 	_, err := ts.Lib.Get(args.UserID)
 	if err != nil {
-		fmt.Println("Found an error in getting the args.UserID")
+		LOGE.Println("Found an error in getting the args.UserID")
 		reply.Status = tribrpc.NoSuchUser
 		return nil
 	}
 
-	//fmt.Println("Checking if the Target user hasnt been added")
+	LOGV.Println("Checking if the Target user hasnt been added")
 	DupCheck, _ := ts.Lib.GetList(args.UserID + ":Sub")
 
 	for index := 0; index < len(DupCheck); index++ {
@@ -122,46 +123,46 @@ func (ts *tribServer) AddSubscription(args *tribrpc.SubscriptionArgs, reply *tri
 		}
 	}
 
-	//fmt.Println("Calling Lib.Get with userID:", args.TargetUserID)
+	LOGV.Println("Calling Lib.Get with userID:", args.TargetUserID)
 	_, err = ts.Lib.Get(args.TargetUserID)
 	if err != nil {
-		//fmt.Println("Found an error in getting the args.TargerUserID")
+		LOGE.Println("Found an error in getting the args.TargerUserID")
 		reply.Status = tribrpc.NoSuchTargetUser
 		return nil
 	}
 
-	//fmt.Println("Calling AppendToList with UserID:", args.TargetUserID)
+	LOGV.Println("Calling AppendToList with UserID:", args.TargetUserID)
 	ts.Lib.AppendToList(args.UserID+":Sub", args.TargetUserID)
 	//PrintList,_ := ts.Lib.GetList(args.UserID+":Sub")
-	//fmt.Println("Checking list:",PrintList)
+	LOGV.Println("Checking list:", PrintList)
 	reply.Status = tribrpc.OK
-	//fmt.Println("Exiting Add Subscription")
+	LOGV.Println("Exiting Add Subscription")
 	return nil
 }
 
 func (ts *tribServer) RemoveSubscription(args *tribrpc.SubscriptionArgs, reply *tribrpc.SubscriptionReply) error {
 
-	//fmt.Println("Calling Remove Subscription")
+	LOGV.Println("Calling Remove Subscription")
 
-	//fmt.Println("Calling Lib.Get with userID:", args.UserID)
+	LOGV.Println("Calling Lib.Get with userID:", args.UserID)
 	_, err := ts.Lib.Get(args.UserID)
 	if err != nil {
-		//fmt.Println("Found an error in getting the args.UserID")
+		LOGE.Println("Found an error in getting the args.UserID")
 		reply.Status = tribrpc.NoSuchUser
 		return nil
 	}
 
-	//fmt.Println("Calling Lib.Get with TargetUserID:", args.TargetUserID)
+	LOGV.Println("Calling Lib.Get with TargetUserID:", args.TargetUserID)
 	_, err = ts.Lib.Get(args.TargetUserID)
 	if err != nil {
-		//fmt.Println("Found an error in getting the args.TargerUserID")
+		LOGE.Println("Found an error in getting the args.TargerUserID")
 		reply.Status = tribrpc.NoSuchTargetUser
 		return nil
 	}
 
-	//fmt.Println("Checking if still subscribed")
+	LOGV.Println("Checking if still subscribed")
 	DupList, _ := ts.Lib.GetList(args.UserID + ":Sub")
-	//fmt.Println(DupList)
+	LOGV.Println(DupList)
 	if len(DupList) == 0 {
 		reply.Status = tribrpc.NoSuchTargetUser
 		return nil
@@ -176,110 +177,110 @@ func (ts *tribServer) RemoveSubscription(args *tribrpc.SubscriptionArgs, reply *
 		}
 	}
 
-	//fmt.Println("Calling RemoveFromList with UserID:", args.TargetUserID)
+	LOGV.Println("Calling RemoveFromList with UserID:", args.TargetUserID)
 	ts.Lib.RemoveFromList(args.UserID+":Sub", args.TargetUserID)
 	//CheckList,_ := ts.Lib.GetList(args.UserID+":Sub")
-	//fmt.Println(CheckList)
+	LOGV.Println(CheckList)
 	reply.Status = tribrpc.OK
-	//fmt.Println("Exiting Remove Subscriptions")
+	LOGV.Println("Exiting Remove Subscriptions")
 	return nil
 }
 
 func (ts *tribServer) GetSubscriptions(args *tribrpc.GetSubscriptionsArgs, reply *tribrpc.GetSubscriptionsReply) error {
-	//fmt.Println("Calling Get Subscriptons")
+	LOGV.Println("Calling Get Subscriptons")
 	UserCheck := ts.Clients[args.UserID]
-	//fmt.Println("Checking for User info:", UserCheck)
+	LOGV.Println("Checking for User info:", UserCheck)
 	if UserCheck.ID == "" {
-		//fmt.Println("Invalid UserID,return error")
+		LOGE.Println("Invalid UserID,return error")
 		reply.Status = tribrpc.NoSuchUser
 		return nil
 	}
 
-	//fmt.Println("Calling Lib.Get to get the subscriptions")
+	LOGV.Println("Calling Lib.Get to get the subscriptions")
 	SubCopy, err := ts.Lib.GetList(args.UserID + ":Sub")
 	if err != nil {
-		//fmt.Println("Lib.get for subs returned an err")
+		LOGE.Println("Lib.get for subs returned an err")
 		reply.Status = tribrpc.NoSuchUser
 		return nil
 	}
 
 	reply.Status = tribrpc.OK
-	//fmt.Println(SubCopy)
+	LOGV.Println(SubCopy)
 	reply.UserIDs = SubCopy
-	//fmt.Println("Exiting Get Subscriptions")
+	LOGV.Println("Exiting Get Subscriptions")
 	return nil
 
 }
 
 func (ts *tribServer) PostTribble(args *tribrpc.PostTribbleArgs, reply *tribrpc.PostTribbleReply) error {
-	//fmt.Println("Calling Get Post Tribble")
+	LOGV.Println("Calling Get Post Tribble")
 	UserCheck := ts.Clients[args.UserID]
 
-	//fmt.Println("Checking for User info:",UserCheck)
+	LOGV.Println("Checking for User info:", UserCheck)
 	if UserCheck.ID == "" {
-		//fmt.Println("Invalid UserID,return error")
+		LOGV.Println("Invalid UserID,return error")
 		reply.Status = tribrpc.NoSuchUser
 		return nil
 	}
 
 	TimeNow := time.Now()
-	//fmt.Println("TimeNow:",TimeNow)
+	LOGV.Println("TimeNow:", TimeNow)
 	TimeUnix := TimeNow.UnixNano() //This doesnt do what we think it does
-	//fmt.Println("TimeUnix:",TimeUnix)
-	//fmt.Println("Reverse Test:",time.Unix(TimeUnix/1000,TimeUnix%1000))
+	LOGV.Println("TimeUnix:", TimeUnix)
+	LOGV.Println("Reverse Test:", time.Unix(TimeUnix/1000, TimeUnix%1000))
 	TimeString := strconv.FormatInt(TimeUnix, 10)
-	//fmt.Println("TimeString:",TimeString)
+	LOGV.Println("TimeString:", TimeString)
 	TribString := args.UserID + ":" + TimeString
-	//fmt.Println("TribString:",TribString)
+	LOGV.Println("TribString:", TribString)
 	reply.Status = tribrpc.OK
-	//fmt.Println("Added add and putting to Tribserver")
+	LOGV.Println("Added add and putting to Tribserver")
 	ts.Lib.Put(TribString, args.Contents)
-	//fmt.Println("TimeString:",TimeString)
+	LOGV.Println("TimeString:", TimeString)
 	ts.Lib.AppendToList(args.UserID+":"+"TimeStamps", TimeString)
 	//TribTest,_ := ts.Lib.GetList(args.UserID+":"+"TimeStamps")
-	//fmt.Println("TribTest:",TribTest)
-	//fmt.Println("Exiting Post Pribble")
+	LOGV.Println("TribTest:", TribTest)
+	LOGV.Println("Exiting Post Pribble")
 	return nil
 }
 
 func (ts *tribServer) GetTribbles(args *tribrpc.GetTribblesArgs, reply *tribrpc.GetTribblesReply) error {
-	//fmt.Println("Entering Get Tribbles")
+	LOGV.Println("Entering Get Tribbles")
 	UserCheck := ts.Clients[args.UserID]
-	//fmt.Println(UserCheck)
+	LOGV.Println(UserCheck)
 	if UserCheck.ID == "" {
-		fmt.Println("Failed looking for a user in ts.Clients")
+		LOGV.Println("Failed looking for a user in ts.Clients")
 		reply.Status = tribrpc.NoSuchUser
 		return nil
 	}
-	//fmt.Println("Calling GetList")
+	LOGV.Println("Calling GetList")
 	LibList, err := ts.Lib.GetList(args.UserID + ":" + "TimeStamps") //Expect a list of timestamps
-	//fmt.Println("LibList:",LibList)
+	LOGV.Println("LibList:", LibList)
 	if err != nil {
-		fmt.Println("Calling GetList failed")
+		LOGE.Println("Calling GetList failed")
 		reply.Status = tribrpc.OK //Changed to allow it to pass zero tribs
 		return nil
 	}
 
 	TimeInt := make([]int64, len(LibList))
-	//fmt.Println("Sorting Tribles by time")
+	LOGV.Println("Sorting Tribles by time")
 	for index := 0; index < len(LibList); index++ {
 		TimeInt[index], err = strconv.ParseInt(LibList[index], 10, 64)
 		if err != nil {
-			fmt.Println("Ran into an error in time checking loop")
+			LOGE.Println("Ran into an error in time checking loop")
 			reply.Status = tribrpc.NoSuchUser
 			return nil
 		}
 	}
-	//fmt.Println("TimeInt:",TimeInt)
+	LOGV.Println("TimeInt:", TimeInt)
 	LongArrayTest := new(LongArray)
 	LongArrayTest.Array = TimeInt
 	sort.Sort(LongArrayTest)
 	TimeInt = LongArrayTest.Array
-	//fmt.Println("TimeInt Sorted:",TimeInt)
+	LOGV.Println("TimeInt Sorted:", TimeInt)
 	var loopTarget int
 	if 100 >= len(LibList) {
 		loopTarget = len(LibList)
-		fmt.Println("LoopTarget:", loopTarget)
+		LOGV.Println("LoopTarget:", loopTarget)
 		TribList := make([]tribrpc.Tribble, loopTarget)
 		for index := 0; index < loopTarget; index++ {
 			Trib := new(tribrpc.Tribble)
@@ -293,7 +294,7 @@ func (ts *tribServer) GetTribbles(args *tribrpc.GetTribblesArgs, reply *tribrpc.
 		reply.Tribbles = TribList
 	} else {
 		loopTarget = 100
-		//fmt.Println("Len over thus LoopTager = 100")
+		LOGV.Println("Len over thus LoopTager = 100")
 		TribList := make([]tribrpc.Tribble, loopTarget)
 		for index := 0; index < 100; index++ {
 			Trib := new(tribrpc.Tribble)
@@ -313,7 +314,7 @@ func (ts *tribServer) GetTribbles(args *tribrpc.GetTribblesArgs, reply *tribrpc.
 		reply.Status = tribrpc.OK
 		reply.Tribbles = TribListTest
 	}
-	fmt.Println("Exiting Get Tribbles")
+	LOGV.Println("Exiting Get Tribbles")
 	return nil
 }
 
