@@ -160,19 +160,19 @@ func (ts *tribServer) RemoveSubscription(args *tribrpc.SubscriptionArgs, reply *
 	}
 
 	//fmt.Println("Checking if still subscribed")
-	DupList,_ := ts.Lib.GetList(args.UserID+":Sub")
+	DupList, _ := ts.Lib.GetList(args.UserID + ":Sub")
 	//fmt.Println(DupList)
-	if (len(DupList) == 0) {
-	   reply.Status = tribrpc.NoSuchTargetUser
-	   return nil
-	   }
-	for index:=0;index<len(DupList);index++ {
-	    if DupList[index] == args.TargetUserID{
-	       break
-	       }
-	     if index == len(DupList)-1 {
-	     	reply.Status = tribrpc.NoSuchTargetUser
+	if len(DupList) == 0 {
+		reply.Status = tribrpc.NoSuchTargetUser
 		return nil
+	}
+	for index := 0; index < len(DupList); index++ {
+		if DupList[index] == args.TargetUserID {
+			break
+		}
+		if index == len(DupList)-1 {
+			reply.Status = tribrpc.NoSuchTargetUser
+			return nil
 		}
 	}
 
@@ -205,7 +205,7 @@ func (ts *tribServer) GetSubscriptions(args *tribrpc.GetSubscriptionsArgs, reply
 
 	reply.Status = tribrpc.OK
 	//fmt.Println(SubCopy)
-	reply.UserIDs = SubCopy 
+	reply.UserIDs = SubCopy
 	//fmt.Println("Exiting Get Subscriptions")
 	return nil
 
@@ -255,7 +255,7 @@ func (ts *tribServer) GetTribbles(args *tribrpc.GetTribblesArgs, reply *tribrpc.
 	LibList, err := ts.Lib.GetList(args.UserID + ":" + "TimeStamps") //Expect a list of timestamps
 	//fmt.Println("LibList:",LibList)
 	if err != nil {
-	        fmt.Println("Calling GetList failed")
+		fmt.Println("Calling GetList failed")
 		reply.Status = tribrpc.OK //Changed to allow it to pass zero tribs
 		return nil
 	}
@@ -265,7 +265,7 @@ func (ts *tribServer) GetTribbles(args *tribrpc.GetTribblesArgs, reply *tribrpc.
 	for index := 0; index < len(LibList); index++ {
 		TimeInt[index], err = strconv.ParseInt(LibList[index], 10, 64)
 		if err != nil {
-		        fmt.Println("Ran into an error in time checking loop")
+			fmt.Println("Ran into an error in time checking loop")
 			reply.Status = tribrpc.NoSuchUser
 			return nil
 		}
@@ -279,39 +279,39 @@ func (ts *tribServer) GetTribbles(args *tribrpc.GetTribblesArgs, reply *tribrpc.
 	var loopTarget int
 	if 100 >= len(LibList) {
 		loopTarget = len(LibList)
-		fmt.Println("LoopTarget:",loopTarget)
+		fmt.Println("LoopTarget:", loopTarget)
 		TribList := make([]tribrpc.Tribble, loopTarget)
 		for index := 0; index < loopTarget; index++ {
-		    Trib := new(tribrpc.Tribble)
-		    Trib.UserID = args.UserID
-		    Trib.Contents, _ = ts.Lib.Get(args.UserID + ":" + strconv.FormatInt(TimeInt[index], 10))
-		    Trib.Posted = time.Unix(TimeInt[index]/1000, TimeInt[index]%1000)
-		   // fmt.Println("Got Trib:",Trib)
-		    TribList[loopTarget-index-1] = *Trib
-	    	}
+			Trib := new(tribrpc.Tribble)
+			Trib.UserID = args.UserID
+			Trib.Contents, _ = ts.Lib.Get(args.UserID + ":" + strconv.FormatInt(TimeInt[index], 10))
+			Trib.Posted = time.Unix(TimeInt[index]/1000, TimeInt[index]%1000)
+			// fmt.Println("Got Trib:",Trib)
+			TribList[loopTarget-index-1] = *Trib
+		}
 		reply.Status = tribrpc.OK
 		reply.Tribbles = TribList
-	}else{
+	} else {
 		loopTarget = 100
 		//fmt.Println("Len over thus LoopTager = 100")
-		TribList := make([]tribrpc.Tribble,loopTarget)
+		TribList := make([]tribrpc.Tribble, loopTarget)
 		for index := 0; index < 100; index++ {
-		    Trib := new(tribrpc.Tribble)
-		    Trib.UserID = args.UserID
-		    ModPosition := len(LibList)-index-1
-		    ModPosition = index+(len(LibList)-100)
-		    Trib.Contents,_ = ts.Lib.Get(args.UserID+":"+strconv.FormatInt(TimeInt[ModPosition],10))
-		    Trib.Posted = time.Unix(TimeInt[index]/1000,TimeInt[index]%1000)
-		    TribList[99-index] = *Trib
-		    }
-		TribListTest := make([]tribrpc.Tribble,loopTarget)
+			Trib := new(tribrpc.Tribble)
+			Trib.UserID = args.UserID
+			ModPosition := len(LibList) - index - 1
+			ModPosition = index + (len(LibList) - 100)
+			Trib.Contents, _ = ts.Lib.Get(args.UserID + ":" + strconv.FormatInt(TimeInt[ModPosition], 10))
+			Trib.Posted = time.Unix(TimeInt[index]/1000, TimeInt[index]%1000)
+			TribList[99-index] = *Trib
+		}
+		TribListTest := make([]tribrpc.Tribble, loopTarget)
 		for index := 0; index < 100; index++ {
-		    //TribListTest[index] = TribList[99-index]
-		    TribListTest[index] = TribList[index]
-		    }
-		    
+			//TribListTest[index] = TribList[99-index]
+			TribListTest[index] = TribList[index]
+		}
+
 		reply.Status = tribrpc.OK
-		reply.Tribbles = TribListTest		    
+		reply.Tribbles = TribListTest
 	}
 	fmt.Println("Exiting Get Tribbles")
 	return nil
