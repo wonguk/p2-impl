@@ -29,7 +29,7 @@ type LongArray struct {
 
 func (a LongArray) Len() int           { return len(a.Array) }
 func (a LongArray) Swap(i, j int)      { a.Array[i], a.Array[j] = a.Array[j], a.Array[i] }
-func (a LongArray) Less(i, j int) bool { return a.Array[i] < a.Array[j] }
+func (a LongArray) Less(i, j int) bool { return a.Array[j] < a.Array[i] }
 
 // NewTribServer creates, starts and returns a new TribServer. masterServerHostPort
 // is the master storage server's host:port and port is this port number on which
@@ -98,18 +98,13 @@ func (ts *tribServer) AddSubscription(args *tribrpc.SubscriptionArgs, reply *tri
 	LOGV.Println("Calling Lib.Get with userID:", args.UserID)
 	_, err := ts.Lib.Get(args.UserID)
 	if err != nil {
-		LOGE.Println("Found an error in getting the args.UserID")
-		reply.Status = tribrpc.NoSuchUser
-		return nil
-	}
-
-	LOGV.Println("Checking if the Target user hasnt been added")
-	DupCheck, _ := ts.Lib.GetList(args.UserID + ":Sub")
-
-	for index := 0; index < len(DupCheck); index++ {
-		if DupCheck[index] == args.TargetUserID {
-			reply.Status = tribrpc.Exists
+		switch err.(type) {
+		case *libstore.KeyNotFound:
+			LOGE.Println("Found an error in getting the args.UserID")
+			reply.Status = tribrpc.NoSuchUser
 			return nil
+		default:
+			return err
 		}
 	}
 
@@ -122,11 +117,18 @@ func (ts *tribServer) AddSubscription(args *tribrpc.SubscriptionArgs, reply *tri
 	}
 
 	LOGV.Println("Calling AppendToList with UserID:", args.TargetUserID)
-	ts.Lib.AppendToList(args.UserID+":Sub", args.TargetUserID)
-	//PrintList,_ := ts.Lib.GetList(args.UserID+":Sub")
-	//LOGV.Println("Checking list:", PrintList)
-	reply.Status = tribrpc.OK
-	LOGV.Println("Exiting Add Subscription")
+	err = ts.Lib.AppendToList(args.UserID+":Sub", args.TargetUserID)
+	if err == nil {
+		reply.Status = tribrpc.OK
+		return nil
+	}
+	switch err.(type) {
+	case *libstore.ItemExists:
+		reply.Status = tribrpc.Exists
+		return nil
+	default:
+		return err
+	}
 	return nil
 }
 
@@ -137,61 +139,77 @@ func (ts *tribServer) RemoveSubscription(args *tribrpc.SubscriptionArgs, reply *
 	LOGV.Println("Calling Lib.Get with userID:", args.UserID)
 	_, err := ts.Lib.Get(args.UserID)
 	if err != nil {
-		LOGE.Println("Found an error in getting the args.UserID")
-		reply.Status = tribrpc.NoSuchUser
-		return nil
+		switch err.(type) {
+		case *libstore.KeyNotFound:
+			LOGE.Println("Found an error in getting the args.UserID")
+			reply.Status = tribrpc.NoSuchUser
+			return nil
+		default:
+			return err
+		}
 	}
 
 	LOGV.Println("Calling Lib.Get with TargetUserID:", args.TargetUserID)
 	_, err = ts.Lib.Get(args.TargetUserID)
 	if err != nil {
-		LOGE.Println("Found an error in getting the args.TargerUserID")
-		reply.Status = tribrpc.NoSuchTargetUser
-		return nil
+		switch err.(type) {
+		case *libstore.KeyNotFound:
+			LOGE.Println("Found an error in getting the args.TargerUserID")
+			reply.Status = tribrpc.NoSuchTargetUser
+			return nil
+		default:
+			return err
+		}
 	}
 
 	LOGV.Println("Checking if still subscribed")
-	DupList, _ := ts.Lib.GetList(args.UserID + ":Sub")
-	LOGV.Println(DupList)
-	if len(DupList) == 0 {
-		reply.Status = tribrpc.NoSuchTargetUser
-		return nil
-	}
-	for index := 0; index < len(DupList); index++ {
-		if DupList[index] == args.TargetUserID {
-			break
-		}
-		if index == len(DupList)-1 {
-			reply.Status = tribrpc.NoSuchTargetUser
-			return nil
-		}
-	}
 
 	LOGV.Println("Calling RemoveFromList with UserID:", args.TargetUserID)
-	ts.Lib.RemoveFromList(args.UserID+":Sub", args.TargetUserID)
-	//CheckList,_ := ts.Lib.GetList(args.UserID+":Sub")
-	//LOGV.Println(CheckList)
-	reply.Status = tribrpc.OK
-	LOGV.Println("Exiting Remove Subscriptions")
-	return nil
+	err = ts.Lib.RemoveFromList(args.UserID+":Sub", args.TargetUserID)
+	if err == nil {
+		reply.Status = tribrpc.OK
+		LOGV.Println("Exiting Remove Subscriptions")
+		return nil
+	}
+
+	switch err.(type) {
+	case *libstore.ItemNotFound:
+		reply.Status = tribrpc.NoSuchTargetUser
+		return nil
+	case *libstore.KeyNotFound:
+		reply.Status = tribrpc.NoSuchTargetUser
+		return nil
+	default:
+		return err
+	}
 }
 
 func (ts *tribServer) GetSubscriptions(args *tribrpc.GetSubscriptionsArgs, reply *tribrpc.GetSubscriptionsReply) error {
 	LOGV.Println("Calling Get Subscriptons")
 	_, err := ts.Lib.Get(args.UserID)
 	if err != nil {
-		reply.Status = tribrpc.NoSuchUser
-		return nil
+		switch err.(type) {
+		case *libstore.KeyNotFound:
+			reply.Status = tribrpc.NoSuchUser
+			return nil
+		default:
+			return err
+		}
 	}
 
 	LOGV.Println("Calling Lib.Get to get the subscriptions")
 	SubCopy, err := ts.Lib.GetList(args.UserID + ":Sub")
 	if err != nil {
-		//LOGE.Println("Lib.get for subs returned an err")
-		//reply.Status = tribrpc.NoSuchUser
-		reply.Status = tribrpc.OK
-		reply.UserIDs = nil
-		return nil
+		switch err.(type) {
+		case *libstore.KeyNotFound:
+			//LOGE.Println("Lib.get for subs returned an err")
+			//reply.Status = tribrpc.NoSuchUser
+			reply.Status = tribrpc.OK
+			reply.UserIDs = nil
+			return nil
+		default:
+			return err
+		}
 	}
 
 	reply.Status = tribrpc.OK
@@ -207,8 +225,13 @@ func (ts *tribServer) PostTribble(args *tribrpc.PostTribbleArgs, reply *tribrpc.
 
 	_, err := ts.Lib.Get(args.UserID)
 	if err != nil {
-		reply.Status = tribrpc.NoSuchUser
-		return nil
+		switch err.(type) {
+		case *libstore.KeyNotFound:
+			reply.Status = tribrpc.NoSuchUser
+			return nil
+		default:
+			return err
+		}
 	}
 
 	TimeNow := time.Now()
@@ -236,8 +259,13 @@ func (ts *tribServer) GetTribbles(args *tribrpc.GetTribblesArgs, reply *tribrpc.
 
 	_, err := ts.Lib.Get(args.UserID)
 	if err != nil {
-		reply.Status = tribrpc.NoSuchUser
-		return nil
+		switch err.(type) {
+		case *libstore.KeyNotFound:
+			reply.Status = tribrpc.NoSuchUser
+			return nil
+		default:
+			return err
+		}
 	}
 
 	LOGV.Println("Calling GetList")
@@ -245,18 +273,23 @@ func (ts *tribServer) GetTribbles(args *tribrpc.GetTribblesArgs, reply *tribrpc.
 	LOGV.Println("LibList:", LibList)
 	if err != nil {
 		LOGE.Println("Calling GetList failed")
-		reply.Status = tribrpc.OK //Changed to allow it to pass zero tribs
-		return nil
+		switch err.(type) {
+		case *libstore.KeyNotFound:
+			reply.Status = tribrpc.OK //Changed to allow it to pass zero tribs
+			return nil
+		default:
+			return err
+		}
 	}
 
 	TimeInt := make([]int64, len(LibList))
 	LOGV.Println("Sorting Tribles by time")
-	for index := 0; index < len(LibList); index++ {
-		TimeInt[index], err = strconv.ParseInt(LibList[index], 10, 64)
+	for index, time := range LibList {
+		TimeInt[index], err = strconv.ParseInt(time, 10, 64)
 		if err != nil {
 			LOGE.Println("Ran into an error in time checking loop")
 			reply.Status = tribrpc.NoSuchUser
-			return nil
+			return err
 		}
 	}
 	LOGV.Println("TimeInt:", TimeInt)
@@ -266,36 +299,25 @@ func (ts *tribServer) GetTribbles(args *tribrpc.GetTribblesArgs, reply *tribrpc.
 	TimeInt = LongArrayTest.Array
 	LOGV.Println("TimeInt Sorted:", TimeInt)
 	var loopTarget int
-	if 100 >= len(LibList) {
+
+	if len(LibList) < 100 {
 		loopTarget = len(LibList)
-		LOGV.Println("LoopTarget:", loopTarget)
-		TribList := make([]tribrpc.Tribble, loopTarget)
-		for index := 0; index < loopTarget; index++ {
-			Trib := new(tribrpc.Tribble)
-			Trib.UserID = args.UserID
-			Trib.Contents, _ = ts.Lib.Get(args.UserID + ":" + strconv.FormatInt(TimeInt[index], 10))
-			Trib.Posted = time.Unix(TimeInt[index]/1000000000, TimeInt[index]%1000000000)
-			TribList[len(TribList)-1-index] = *Trib
-		}
-		reply.Status = tribrpc.OK
-		reply.Tribbles = TribList
 	} else {
 		loopTarget = 100
-		LOGV.Println("Len over thus LoopTager = 100")
-		TribList := make([]tribrpc.Tribble, loopTarget)
-		for index := 0; index < 100; index++ {
-			Trib := new(tribrpc.Tribble)
-			Trib.UserID = args.UserID
-			ModPosition := len(LibList) - index - 1
-			ModPosition = index + (len(LibList) - 100)
-			Trib.Contents, _ = ts.Lib.Get(args.UserID + ":" + strconv.FormatInt(TimeInt[ModPosition], 10))
-			Trib.Posted = time.Unix(TimeInt[index]/1000000000, TimeInt[index]%1000000000)
-			TribList[99-index] = *Trib
-		}
-
-		reply.Status = tribrpc.OK
-		reply.Tribbles = TribList
 	}
+
+	TribList := make([]tribrpc.Tribble, loopTarget)
+
+	for i, _ := range TribList {
+		Trib := new(tribrpc.Tribble)
+		Trib.UserID = args.UserID
+		Trib.Contents, err = ts.Lib.Get(args.UserID + ":" + strconv.FormatInt(TimeInt[i], 10))
+		Trib.Posted = time.Unix(TimeInt[i]/1000000000, TimeInt[i]%1000000000)
+		TribList[i] = *Trib
+	}
+
+	reply.Status = tribrpc.OK
+	reply.Tribbles = TribList
 	LOGV.Println("Exiting Get Tribbles")
 	return nil
 }
@@ -320,8 +342,13 @@ func (ts *tribServer) GetTribblesBySubscription(args *tribrpc.GetTribblesArgs, r
 
 	SubList, err := ts.Lib.GetList(args.UserID + ":Sub")
 	if err != nil {
-		reply.Status = tribrpc.OK
-		return nil
+		switch err.(type) {
+		case *libstore.KeyNotFound:
+			reply.Status = tribrpc.OK
+			return nil
+		default:
+			return err
+		}
 	}
 
 	FullList := make(subTribs, 0)

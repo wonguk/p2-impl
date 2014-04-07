@@ -116,9 +116,11 @@ func NewStorageServer(masterServerHostPort string, numNodes, port int, nodeID ui
 	} else {
 		LOGV.Println("Slave:", nodeID, "Dialing master")
 		client, err := rpc.DialHTTP("tcp", masterServerHostPort)
-		if err != nil {
+
+		//Try connecting to master until it works
+		for err != nil {
 			LOGV.Println("Slave:", nodeID, "failed to connect to master", err)
-			return nil, err
+			client, err = rpc.DialHTTP("tcp", masterServerHostPort)
 		}
 		defer client.Close()
 
