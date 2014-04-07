@@ -18,14 +18,8 @@ import (
 var LOGE = log.New(ioutil.Discard, "ERROR ", log.Lmicroseconds|log.Lshortfile)
 var LOGV = log.New(ioutil.Discard, "VERBOSE ", log.Lmicroseconds|log.Lshortfile)
 
-type tribbleUser struct {
-	ID string
-}
-
 type tribServer struct {
-	Clients map[string]tribbleUser //As seen in figure 1 a TribServer must be able to handle multiple TribClients
-	Lib     libstore.Libstore
-	//Might want to store stuff here depending on Libstore
+	Lib libstore.Libstore
 }
 
 //This is here so we can sort arrays of int64
@@ -54,7 +48,6 @@ func NewTribServer(masterServerHostPort, myHostPort string) (TribServer, error) 
 		return nil, err
 	}
 
-	ts.Clients = make(map[string]tribbleUser)
 	LOGV.Println("Calling NewLibstore")
 	ts.Lib, err = libstore.NewLibstore(masterServerHostPort, myHostPort, libstore.Normal)
 
@@ -91,12 +84,9 @@ func (ts *tribServer) CreateUser(args *tribrpc.CreateUserArgs, reply *tribrpc.Cr
 		return err
 	}
 
-	User := new(tribbleUser)
-	User.ID = args.UserID
 	LOGV.Println("Putting the userID into the lib server")
 	err = ts.Lib.Put(args.UserID, "0") //Make sure type is right
 	LOGV.Println("Add the user to the list of clients and setting reply to have ok")
-	ts.Clients[User.ID] = *User
 	reply.Status = tribrpc.OK
 	LOGV.Println("Exiting Create User")
 	return nil
@@ -188,10 +178,8 @@ func (ts *tribServer) RemoveSubscription(args *tribrpc.SubscriptionArgs, reply *
 
 func (ts *tribServer) GetSubscriptions(args *tribrpc.GetSubscriptionsArgs, reply *tribrpc.GetSubscriptionsReply) error {
 	LOGV.Println("Calling Get Subscriptons")
-	UserCheck := ts.Clients[args.UserID]
-	LOGV.Println("Checking for User info:", UserCheck)
-	if UserCheck.ID == "" {
-		LOGE.Println("Invalid UserID,return error")
+	_, err := ts.Lib.Get(args.UserID)
+	if err != nil {
 		reply.Status = tribrpc.NoSuchUser
 		return nil
 	}
@@ -199,8 +187,10 @@ func (ts *tribServer) GetSubscriptions(args *tribrpc.GetSubscriptionsArgs, reply
 	LOGV.Println("Calling Lib.Get to get the subscriptions")
 	SubCopy, err := ts.Lib.GetList(args.UserID + ":Sub")
 	if err != nil {
-		LOGE.Println("Lib.get for subs returned an err")
-		reply.Status = tribrpc.NoSuchUser
+		//LOGE.Println("Lib.get for subs returned an err")
+		//reply.Status = tribrpc.NoSuchUser
+		reply.Status = tribrpc.OK
+		reply.UserIDs = nil
 		return nil
 	}
 
@@ -214,11 +204,9 @@ func (ts *tribServer) GetSubscriptions(args *tribrpc.GetSubscriptionsArgs, reply
 
 func (ts *tribServer) PostTribble(args *tribrpc.PostTribbleArgs, reply *tribrpc.PostTribbleReply) error {
 	LOGV.Println("Calling Get Post Tribble")
-	UserCheck := ts.Clients[args.UserID]
 
-	LOGV.Println("Checking for User info:", UserCheck)
-	if UserCheck.ID == "" {
-		LOGV.Println("Invalid UserID,return error")
+	_, err := ts.Lib.Get(args.UserID)
+	if err != nil {
 		reply.Status = tribrpc.NoSuchUser
 		return nil
 	}
@@ -245,13 +233,13 @@ func (ts *tribServer) PostTribble(args *tribrpc.PostTribbleArgs, reply *tribrpc.
 
 func (ts *tribServer) GetTribbles(args *tribrpc.GetTribblesArgs, reply *tribrpc.GetTribblesReply) error {
 	LOGV.Println("Entering Get Tribbles")
-	UserCheck := ts.Clients[args.UserID]
-	LOGV.Println(UserCheck)
-	if UserCheck.ID == "" {
-		LOGV.Println("Failed looking for a user in ts.Clients")
+
+	_, err := ts.Lib.Get(args.UserID)
+	if err != nil {
 		reply.Status = tribrpc.NoSuchUser
 		return nil
 	}
+
 	LOGV.Println("Calling GetList")
 	LibList, err := ts.Lib.GetList(args.UserID + ":" + "TimeStamps") //Expect a list of timestamps
 	LOGV.Println("LibList:", LibList)
@@ -324,8 +312,8 @@ func (s subTribs) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 func (s subTribs) Less(i, j int) bool { return s[j].time < s[i].time }
 
 func (ts *tribServer) GetTribblesBySubscription(args *tribrpc.GetTribblesArgs, reply *tribrpc.GetTribblesReply) error {
-	UserCheck := ts.Clients[args.UserID]
-	if UserCheck.ID == "" {
+	_, err := ts.Lib.Get(args.UserID)
+	if err != nil {
 		reply.Status = tribrpc.NoSuchUser
 		return nil
 	}
@@ -339,7 +327,7 @@ func (ts *tribServer) GetTribblesBySubscription(args *tribrpc.GetTribblesArgs, r
 	FullList := make(subTribs, 0)
 
 	for _, sub := range SubList {
-		SubLibList,_ := ts.Lib.GetList(sub + ":" + "TimeStamps")
+		SubLibList, _ := ts.Lib.GetList(sub + ":" + "TimeStamps")
 
 		for _, t := range SubLibList {
 			time, _ := strconv.ParseInt(t, 10, 64)
