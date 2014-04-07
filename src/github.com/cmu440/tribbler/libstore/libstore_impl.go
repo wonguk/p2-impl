@@ -7,6 +7,7 @@ import (
 	"net/rpc"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cmu440/tribbler/rpc/librpc"
@@ -29,6 +30,7 @@ type libstore struct {
 
 	storageservers Nodes
 	storageclients []*rpc.Client
+	storageLock    sync.Mutex
 
 	queryMaster *queryMaster
 	cacheMaster *cacheMaster
@@ -65,6 +67,7 @@ func NewLibstore(masterServerHostPort, myHostPort string, mode LeaseMode) (Libst
 	ls.mode = mode
 	ls.masterServer = masterServerHostPort
 	ls.hostport = myHostPort
+	ls.storageLock = sync.Mutex{}
 
 	qm := new(queryMaster)
 
@@ -111,10 +114,11 @@ func NewLibstore(masterServerHostPort, myHostPort string, mode LeaseMode) (Libst
 			LOGV.Println("[LIB]", "NewLibstore:", "Recieved list of servers")
 			sort.Sort(Nodes(reply.Servers))
 			ls.storageservers = reply.Servers
+			ls.storageclients = make([]*rpc.Client, len(ls.storageservers))
 
 			rpc.RegisterName("LeaseCallbacks", librpc.Wrap(ls))
 
-			err = ls.initStorageClients()
+			//err = ls.initStorageClients()
 
 			LOGV.Println("[LIB]", "NewLibstore:", "Done!")
 			return ls, err
@@ -391,14 +395,36 @@ func (ls *libstore) getStorageClient(key string) *rpc.Client {
 	for i, s := range ls.storageservers {
 		if s.NodeID >= hash {
 			LOGV.Println("[LIB]", "getStorageClient:", "Routing to", s.NodeID)
-
-			return ls.storageclients[i]
+			return ls.getClient(i)
 		}
 	}
 
 	LOGV.Println("[LIB]", "getStorageClient:", "Routing to",
 		ls.storageservers[0].NodeID)
-	return ls.storageclients[0]
+
+	return ls.getClient(0)
+}
+
+func (ls *libstore) getClient(i int) *rpc.Client {
+	ls.storageLock.Lock()
+	defer ls.storageLock.Unlock()
+
+	if ls.storageclients[i] == nil {
+		client, err := rpc.DialHTTP("tcp", ls.storageservers[i].HostPort)
+
+		for err != nil {
+			LOGE.Println("[LIB]", "NewLibstore:", "Error initializing client",
+				ls.storageservers[i].NodeID, err)
+
+			time.Sleep(time.Second)
+
+			client, err = rpc.DialHTTP("tcp", ls.storageservers[i].HostPort)
+		}
+
+		ls.storageclients[i] = client
+	}
+
+	return ls.storageclients[i]
 }
 
 func (ls *libstore) requestLease(key string) bool {
@@ -455,6 +481,7 @@ func (ls *libstore) addToCache(key, value string, listValue []string, duration i
 	ls.cacheMaster.newCacheChan <- cc
 }
 
+/*
 func (ls *libstore) initStorageClients() error {
 	LOGV.Println("[LIB]", "initStorageClients:", "initializing clients...")
 	ls.storageclients = make([]*rpc.Client, len(ls.storageservers))
@@ -462,14 +489,29 @@ func (ls *libstore) initStorageClients() error {
 	for i, node := range ls.storageservers {
 		client, err := rpc.DialHTTP("tcp", node.HostPort)
 
-		if err != nil {
+		for err != nil {
 			LOGE.Println("[LIB]", "NewLibstore:", "Error initializing client",
 				node.NodeID, err)
-			return err
+
+			time.Sleep(time.Second)
+
+			client, err = rpc.DialHTTP("tcp", node.HostPort)
 		}
 
 		ls.storageclients[i] = client
 	}
 
+	args := new(storagerpc.GetServersArgs)
+	reply := new(storagerpc.GetServersReply)
+
+	for _, client := range ls.storageclients {
+		client.Call("StorageServer.GetServers", args, reply)
+
+		for reply.Status != storagerpc.OK {
+			time.Sleep(time.Second)
+			client.Call("StorageServer.GetServers", args, reply)
+		}
+	}
+
 	return nil
-}
+}*/
