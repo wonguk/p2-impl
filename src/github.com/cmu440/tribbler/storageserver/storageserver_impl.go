@@ -70,12 +70,12 @@ func NewStorageServer(masterServerHostPort string, numNodes, port int, nodeID ui
 		ss.master = false
 	}
 
-	hostname, err := os.Hostname()
-	if err != nil {
-		return nil, err
-	}
+	//hostname, err := os.Hostname()
+	//if err != nil {
+	//		return nil, err
+	//}
 
-	hostport := hostname + ":" + strconv.Itoa(port)
+	hostport := "localhost:" + strconv.Itoa(port)
 
 	ss.masterLock = sync.Mutex{}
 	ss.readyLock = sync.Mutex{}
