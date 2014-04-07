@@ -2,7 +2,7 @@ package storageserver
 
 import (
 	"errors"
-	"io/ioutil"
+	//"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -24,18 +24,19 @@ func (n Nodes) Len() int           { return len(n) }
 func (n Nodes) Swap(i, j int)      { n[i], n[j] = n[j], n[i] }
 func (n Nodes) Less(i, j int) bool { return n[i].NodeID < n[j].NodeID }
 
-//var logfile, _ = os.OpenFile("testlogfile", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+var logfile, _ = os.OpenFile("testlogfile", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 
-var LOGE = log.New(ioutil.Discard,
-	"ERROR [StorageServer] ",
-	log.Lmicroseconds|log.Lshortfile)
-var LOGV = log.New(ioutil.Discard,
+var LOGE = log.New(logfile, //ioutil.Discard,
+				"ERROR [StorageServer] ",
+				log.Lmicroseconds|log.Lshortfile)
+var LOGV = log.New(logfile, //ioutil.Discard,
 	"VERBOSE [StorageServer] ",
 	log.Lmicroseconds|log.Lshortfile)
 
 type storageServer struct {
 	master     bool
 	masterLock sync.Mutex
+	readyLock  sync.Mutex
 	masterAddr string
 	numNodes   int
 	port       int
@@ -77,6 +78,7 @@ func NewStorageServer(masterServerHostPort string, numNodes, port int, nodeID ui
 	hostport := hostname + ":" + strconv.Itoa(port)
 
 	ss.masterLock = sync.Mutex{}
+	ss.readyLock = sync.Mutex{}
 	ss.masterAddr = masterServerHostPort
 	ss.numNodes = numNodes
 	ss.port = port
@@ -107,7 +109,9 @@ func NewStorageServer(masterServerHostPort string, numNodes, port int, nodeID ui
 	if ss.master {
 		if ss.numNodes == 1 {
 			LOGV.Println("Master:", "Done Initializing")
+			ss.readyLock.Lock()
 			ss.isReady = true
+			ss.readyLock.Unlock()
 			return ss, nil
 		} else {
 			LOGV.Println("Master:", nodeID, "Waiting for nodes to register")
@@ -120,6 +124,9 @@ func NewStorageServer(masterServerHostPort string, numNodes, port int, nodeID ui
 		//Try connecting to master until it works
 		for err != nil {
 			LOGV.Println("Slave:", nodeID, "failed to connect to master", err)
+
+			time.Sleep(time.Second)
+
 			client, err = rpc.DialHTTP("tcp", masterServerHostPort)
 		}
 		defer client.Close()
@@ -146,7 +153,9 @@ func NewStorageServer(masterServerHostPort string, numNodes, port int, nodeID ui
 				ss.servers = reply.Servers
 				sort.Sort(Nodes(ss.servers))
 
+				ss.readyLock.Lock()
 				ss.isReady = true
+				ss.readyLock.Unlock()
 				return ss, nil
 			}
 
@@ -155,7 +164,9 @@ func NewStorageServer(masterServerHostPort string, numNodes, port int, nodeID ui
 		}
 	}
 
+	ss.readyLock.Lock()
 	ss.isReady = true
+	ss.readyLock.Unlock()
 
 	return ss, nil
 }
@@ -210,11 +221,14 @@ func (ss *storageServer) RegisterServer(args *storagerpc.RegisterArgs, reply *st
 }
 
 func (ss *storageServer) GetServers(args *storagerpc.GetServersArgs, reply *storagerpc.GetServersReply) error {
+	ss.readyLock.Lock()
 	if !ss.isReady {
+		ss.readyLock.Unlock()
 		LOGE.Println("GetServers:", ss.nodeID, "server is Not Ready")
 		reply.Status = storagerpc.NotReady
 		return nil
 	}
+	ss.readyLock.Unlock()
 
 	LOGV.Println("GetServers:", ss.nodeID, "Returning servers")
 	reply.Status = storagerpc.OK
@@ -224,11 +238,14 @@ func (ss *storageServer) GetServers(args *storagerpc.GetServersArgs, reply *stor
 }
 
 func (ss *storageServer) Get(args *storagerpc.GetArgs, reply *storagerpc.GetReply) error {
+	ss.readyLock.Lock()
 	if !ss.isReady {
+		ss.readyLock.Unlock()
 		LOGE.Println("Get:", ss.nodeID, "server is not ready")
 		reply.Status = storagerpc.NotReady
 		return nil
 	}
+	ss.readyLock.Unlock()
 
 	LOGV.Println("Get:", ss.nodeID, "Recieved Get Request for", args.Key)
 	if !ss.isKeyOkay(args.Key) {
@@ -251,11 +268,14 @@ func (ss *storageServer) Get(args *storagerpc.GetArgs, reply *storagerpc.GetRepl
 }
 
 func (ss *storageServer) GetList(args *storagerpc.GetArgs, reply *storagerpc.GetListReply) error {
+	ss.readyLock.Lock()
 	if !ss.isReady {
+		ss.readyLock.Unlock()
 		LOGE.Println("GetList:", ss.nodeID, "server is not ready")
 		reply.Status = storagerpc.NotReady
 		return nil
 	}
+	ss.readyLock.Unlock()
 
 	LOGV.Println("GetList:", ss.nodeID, "Recieved GetList Request for", args.Key)
 	if !ss.isKeyOkay(args.Key) {
@@ -278,11 +298,14 @@ func (ss *storageServer) GetList(args *storagerpc.GetArgs, reply *storagerpc.Get
 }
 
 func (ss *storageServer) Put(args *storagerpc.PutArgs, reply *storagerpc.PutReply) error {
+	ss.readyLock.Lock()
 	if !ss.isReady {
+		ss.readyLock.Unlock()
 		LOGE.Println("Put:", ss.nodeID, "server is not ready")
 		reply.Status = storagerpc.NotReady
 		return nil
 	}
+	ss.readyLock.Unlock()
 
 	LOGV.Println("Put:", ss.nodeID, "Recieved Put Requst", args.Key, args.Value)
 	if !ss.isKeyOkay(args.Key) {
@@ -305,11 +328,14 @@ func (ss *storageServer) Put(args *storagerpc.PutArgs, reply *storagerpc.PutRepl
 }
 
 func (ss *storageServer) AppendToList(args *storagerpc.PutArgs, reply *storagerpc.PutReply) error {
+	ss.readyLock.Lock()
 	if !ss.isReady {
+		ss.readyLock.Unlock()
 		LOGE.Println("AppendToList:", ss.nodeID, "server is not ready")
 		reply.Status = storagerpc.NotReady
 		return nil
 	}
+	ss.readyLock.Unlock()
 
 	LOGV.Println("AppendToList:", ss.nodeID, "Recieved append request",
 		args.Key, args.Value)
@@ -334,11 +360,14 @@ func (ss *storageServer) AppendToList(args *storagerpc.PutArgs, reply *storagerp
 }
 
 func (ss *storageServer) RemoveFromList(args *storagerpc.PutArgs, reply *storagerpc.PutReply) error {
+	ss.readyLock.Lock()
 	if !ss.isReady {
+		ss.readyLock.Unlock()
 		LOGE.Println("RemoveFromList:", ss.nodeID, "server is not ready")
 		reply.Status = storagerpc.NotReady
 		return nil
 	}
+	ss.readyLock.Unlock()
 
 	LOGV.Println("RemoveFromList:", ss.nodeID, "Recieved remove request",
 		args.Key, args.Value)
