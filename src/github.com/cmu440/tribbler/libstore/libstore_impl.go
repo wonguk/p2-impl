@@ -166,22 +166,22 @@ func (ls *libstore) Get(key string) (string, error) {
 		return reply.Value, nil
 	case storagerpc.KeyNotFound:
 		LOGE.Println("[LIB]", "Get:", "(KeyNotFound)", key)
-		return "", errors.New("key not found")
+		return "", new(KeyNotFound)
 	case storagerpc.ItemNotFound:
 		LOGE.Println("[LIB]", "Get:", "(ItemNotFound)", key)
-		return "", errors.New("item not found")
+		return "", new(ItemNotFound)
 	case storagerpc.WrongServer:
 		LOGE.Println("[LIB]", "Get:", "(WrongServer)", key)
-		return "", errors.New("wrong server")
+		return "", new(WrongServer)
 	case storagerpc.ItemExists:
 		LOGE.Println("[LIB]", "Get:", "(ItemExists)", key)
-		return "", errors.New("items exist")
+		return "", new(ItemExists)
 	case storagerpc.NotReady:
 		LOGE.Println("[LIB]", "Get:", "(NotReady)", key)
-		return "", errors.New("not ready")
+		return "", new(NotReady)
 	default:
 		LOGE.Println("[LIB]", "Get:", "(invalid status)", key)
-		return "", errors.New("invalid status")
+		return "", new(InvalidStatus)
 	}
 }
 
@@ -206,22 +206,22 @@ func (ls *libstore) Put(key, value string) error {
 		return nil
 	case storagerpc.KeyNotFound:
 		LOGE.Println("[LIB]", "Put:", "(KeyNotFound)", key, value)
-		return errors.New("key not found")
+		return new(KeyNotFound)
 	case storagerpc.ItemNotFound:
 		LOGE.Println("[LIB]", "Put:", "(ItemNotFound)", key, value)
-		return errors.New("item not found")
+		return new(ItemNotFound)
 	case storagerpc.WrongServer:
 		LOGE.Println("[LIB]", "Put:", "(WrongServer)", key, value)
-		return errors.New("wrong server")
+		return new(WrongServer)
 	case storagerpc.ItemExists:
 		LOGE.Println("[LIB]", "Put:", "(ItemExists)", key, value)
-		return errors.New("items exist")
+		return new(ItemExists)
 	case storagerpc.NotReady:
 		LOGE.Println("[LIB]", "Put:", "(NotReady)", key, value)
-		return errors.New("not ready")
+		return new(NotReady)
 	default:
 		LOGE.Println("[LIB]", "Put:", "invalid status", key, value)
-		return errors.New("invalid status")
+		return new(InvalidStatus)
 	}
 }
 
@@ -264,22 +264,22 @@ func (ls *libstore) GetList(key string) ([]string, error) {
 		return reply.Value, nil
 	case storagerpc.KeyNotFound:
 		LOGE.Println("[LIB]", "GetList:", "(KeyNotFound)", key)
-		return nil, errors.New("key not found")
+		return nil, new(KeyNotFound)
 	case storagerpc.ItemNotFound:
 		LOGE.Println("[LIB]", "GetList:", "(ItemNotFound)", key)
-		return nil, errors.New("item not found")
+		return nil, new(ItemNotFound)
 	case storagerpc.WrongServer:
 		LOGE.Println("[LIB]", "GetList:", "(WrongServer)", key)
-		return nil, errors.New("wrong server")
+		return nil, new(WrongServer)
 	case storagerpc.ItemExists:
 		LOGE.Println("[LIB]", "GetList:", "(ItemExists)", key)
-		return nil, errors.New("items exist")
+		return nil, new(ItemExists)
 	case storagerpc.NotReady:
 		LOGE.Println("[LIB]", "GetList:", "(NotReady)", key)
-		return nil, errors.New("not ready")
+		return nil, new(NotReady)
 	default:
 		LOGE.Println("[LIB]", "GetList:", "invalid status", key)
-		return nil, errors.New("invalid status")
+		return nil, new(InvalidStatus)
 	}
 }
 
@@ -304,22 +304,22 @@ func (ls *libstore) RemoveFromList(key, removeItem string) error {
 		return nil
 	case storagerpc.KeyNotFound:
 		LOGE.Println("[LIB]", "RemoveFromList:", "(KeyNotFound)", key, removeItem)
-		return errors.New("key not found")
+		return new(KeyNotFound)
 	case storagerpc.ItemNotFound:
 		LOGE.Println("[LIB]", "RemoveFromList:", "(ItemNotFound)", key, removeItem)
-		return errors.New("item not found")
+		return new(ItemNotFound)
 	case storagerpc.WrongServer:
 		LOGE.Println("[LIB]", "RemoveFromList:", "(WrongServer)", key, removeItem)
-		return errors.New("wrong server")
+		return new(WrongServer)
 	case storagerpc.ItemExists:
 		LOGE.Println("[LIB]", "RemoveFromList:", "(ItemExists)", key, removeItem)
-		return errors.New("items exist")
+		return new(ItemExists)
 	case storagerpc.NotReady:
 		LOGE.Println("[LIB]", "RemoveFromList:", "(NotReady)", key, removeItem)
-		return errors.New("not ready")
+		return new(NotReady)
 	default:
 		LOGE.Println("[LIB]", "RemoveFromList:", "invalid status", key, removeItem)
-		return errors.New("invalid status")
+		return new(InvalidStatus)
 	}
 }
 
@@ -344,22 +344,22 @@ func (ls *libstore) AppendToList(key, newItem string) error {
 		return nil
 	case storagerpc.KeyNotFound:
 		LOGE.Println("[LIB]", "AppendToList:", "(KeyNotFound)", key, newItem)
-		return errors.New("key not found")
+		return new(KeyNotFound)
 	case storagerpc.ItemNotFound:
 		LOGE.Println("[LIB]", "AppendToList:", "(ItemNotFound)", key, newItem)
-		return errors.New("item not found")
+		return new(ItemNotFound)
 	case storagerpc.WrongServer:
 		LOGE.Println("[LIB]", "AppendToList:", "(WrongServer)", key, newItem)
-		return errors.New("wrong server")
+		return new(WrongServer)
 	case storagerpc.ItemExists:
 		LOGE.Println("[LIB]", "AppendToList:", "(ItemExists)", key, newItem)
-		return errors.New("items exist")
+		return new(ItemExists)
 	case storagerpc.NotReady:
 		LOGE.Println("[LIB]", "AppendToList:", "(NotReady)", key, newItem)
-		return errors.New("not ready")
+		return new(NotReady)
 	default:
 		LOGE.Println("[LIB]", "AppendToList:", "invalid status", key, newItem)
-		return errors.New("invalid status")
+		return new(InvalidStatus)
 	}
 }
 
