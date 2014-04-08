@@ -54,9 +54,9 @@ func NewTribServer(masterServerHostPort, myHostPort string) (TribServer, error) 
 
 	LOGV.Println("Attempting to make an rpc call to RegisterName")
 	err = rpc.RegisterName("TribServer", tribrpc.Wrap(ts))
-	if err != nil {
+	for err != nil {
 		LOGE.Println("Failed at making the rpc call")
-		return nil, err
+		err = rpc.RegisterName("TribServer", tribrpc.Wrap(ts))
 	}
 
 	LOGV.Println("Making a rpc call to HandleHTTP")
@@ -86,6 +86,16 @@ func (ts *tribServer) CreateUser(args *tribrpc.CreateUserArgs, reply *tribrpc.Cr
 
 	LOGV.Println("Putting the userID into the lib server")
 	err = ts.Lib.Put(args.UserID, "0") //Make sure type is right
+	if err != nil {
+		switch err.(type) {
+		case *libstore.ItemExists:
+			reply.Status = tribrpc.Exists
+			return nil
+		default:
+			return err
+		}
+	}
+
 	LOGV.Println("Add the user to the list of clients and setting reply to have ok")
 	reply.Status = tribrpc.OK
 	LOGV.Println("Exiting Create User")
@@ -245,19 +255,11 @@ func (ts *tribServer) PostTribble(args *tribrpc.PostTribbleArgs, reply *tribrpc.
 	TimeNow := time.Now()
 	LOGV.Println("TimeNow:", TimeNow)
 	TimeUnix := TimeNow.UnixNano() //This doesnt do what we think it does
-	LOGV.Println("TimeUnix:", TimeUnix)
-	LOGV.Println("Reverse Test:", time.Unix(TimeUnix/1000, TimeUnix%1000))
 	TimeString := strconv.FormatInt(TimeUnix, 10)
-	LOGV.Println("TimeString:", TimeString)
 	TribString := args.UserID + ":" + TimeString
-	LOGV.Println("TribString:", TribString)
 	reply.Status = tribrpc.OK
-	LOGV.Println("Added add and putting to Tribserver")
 	ts.Lib.Put(TribString, args.Contents)
-	LOGV.Println("TimeString:", TimeString)
 	ts.Lib.AppendToList(args.UserID+":"+"TimeStamps", TimeString)
-	//TribTest,_ := ts.Lib.GetList(args.UserID+":"+"TimeStamps")
-	//LOGV.Println("TribTest:", TribTest)
 	LOGV.Println("Exiting Post Pribble")
 	return nil
 }
@@ -315,13 +317,22 @@ func (ts *tribServer) GetTribbles(args *tribrpc.GetTribblesArgs, reply *tribrpc.
 	}
 
 	TribList := make([]tribrpc.Tribble, loopTarget)
+	count := make(chan bool)
 
-	for i, _ := range TribList {
-		Trib := new(tribrpc.Tribble)
-		Trib.UserID = args.UserID
-		Trib.Contents, err = ts.Lib.Get(args.UserID + ":" + TimeInt[i].timeStr)
-		Trib.Posted = time.Unix(TimeInt[i].time/1000000000, TimeInt[i].time%1000000000)
-		TribList[i] = *Trib
+	for index, _ := range TribList {
+		f := func(i int) {
+			Trib := new(tribrpc.Tribble)
+			Trib.UserID = args.UserID
+			Trib.Contents, err = ts.Lib.Get(args.UserID + ":" + TimeInt[i].timeStr)
+			Trib.Posted = time.Unix(0, TimeInt[i].time) ///1000000000, TimeInt[i].time%1000000000)
+			TribList[i] = *Trib
+			count <- true
+		}
+		go f(index)
+	}
+
+	for i := 0; i < loopTarget; i++ {
+		<-count
 	}
 
 	reply.Status = tribrpc.OK
@@ -363,14 +374,26 @@ func (ts *tribServer) GetTribblesBySubscription(args *tribrpc.GetTribblesArgs, r
 	}
 
 	FullList := make(subTribs, 0)
+	count := make(chan bool)
+	Lock := sync.Mutex{}
 
-	for _, sub := range SubList {
-		SubLibList, _ := ts.Lib.GetList(sub + ":" + "TimeStamps")
+	for _, s := range SubList {
+		f := func(sub string) {
+			SubLibList, _ := ts.Lib.GetList(sub + ":" + "TimeStamps")
 
-		for _, t := range SubLibList {
-			time, _ := strconv.ParseInt(t, 10, 64)
-			FullList = append(FullList, subTrib{sub, t, time})
+			for _, t := range SubLibList {
+				time, _ := strconv.ParseInt(t, 10, 64)
+				Lock.Lock()
+				FullList = append(FullList, subTrib{sub, t, time})
+				Lock.Unlock()
+			}
+			count <- true
 		}
+		go f(s)
+	}
+
+	for i := 0; i < len(SubList); i++ {
+		<-count
 	}
 
 	sort.Sort(subTribs(FullList))
@@ -383,14 +406,23 @@ func (ts *tribServer) GetTribblesBySubscription(args *tribrpc.GetTribblesArgs, r
 	}
 
 	TribList := make([]tribrpc.Tribble, loopTarget)
-	for index := 0; index < loopTarget; index++ {
-		Trib := new(tribrpc.Tribble)
-		Trib.UserID = FullList[index].user
-		timeStr := FullList[index].timeStr
-		Trib.Contents, _ = ts.Lib.Get(FullList[index].user + ":" + timeStr)
-		Trib.Posted = time.Unix(FullList[index].time/1000000000, FullList[index].time%1000000000)
-		TribList[index] = *Trib
+	for i := 0; i < loopTarget; i++ {
+		f := func(index int) {
+			Trib := new(tribrpc.Tribble)
+			Trib.UserID = FullList[index].user
+			timeStr := FullList[index].timeStr
+			Trib.Contents, _ = ts.Lib.Get(FullList[index].user + ":" + timeStr)
+			Trib.Posted = time.Unix(0, FullList[index].time) //FullList[index].time/1000000000, FullList[index].time%1000000000)
+			TribList[index] = *Trib
+			count <- true
+		}
+		go f(i)
 	}
+
+	for i := 0; i < loopTarget; i++ {
+		<-count
+	}
+
 	reply.Status = tribrpc.OK
 	reply.Tribbles = TribList
 	return nil

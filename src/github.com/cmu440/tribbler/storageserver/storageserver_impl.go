@@ -2,7 +2,8 @@ package storageserver
 
 import (
 	"errors"
-	//"io/ioutil"
+	//	"fmt"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -26,10 +27,10 @@ func (n Nodes) Less(i, j int) bool { return n[i].NodeID < n[j].NodeID }
 
 var logfile, _ = os.OpenFile("testlogfile", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 
-var LOGE = log.New(logfile, //ioutil.Discard,
-				"ERROR [StorageServer] ",
-				log.Lmicroseconds|log.Lshortfile)
-var LOGV = log.New(logfile, //ioutil.Discard,
+var LOGE = log.New(ioutil.Discard,
+	"ERROR [StorageServer] ",
+	log.Lmicroseconds|log.Lshortfile)
+var LOGV = log.New(ioutil.Discard,
 	"VERBOSE [StorageServer] ",
 	log.Lmicroseconds|log.Lshortfile)
 
@@ -48,6 +49,8 @@ type storageServer struct {
 
 	nodeHandlers map[string]chan command
 	nodeBalChan  chan command
+
+	libstoreClientChan chan clientRequest
 }
 
 // NewStorageServer creates and starts a new StorageServer. masterServerHostPort
@@ -70,11 +73,6 @@ func NewStorageServer(masterServerHostPort string, numNodes, port int, nodeID ui
 		ss.master = false
 	}
 
-	//hostname, err := os.Hostname()
-	//if err != nil {
-	//		return nil, err
-	//}
-
 	hostport := "localhost:" + strconv.Itoa(port)
 
 	ss.masterLock = sync.Mutex{}
@@ -93,9 +91,16 @@ func NewStorageServer(masterServerHostPort string, numNodes, port int, nodeID ui
 	ss.ready = make(chan struct{})
 
 	ss.nodeHandlers = make(map[string]chan command)
-	ss.nodeBalChan = make(chan command)
+	ss.nodeBalChan = make(chan command, 8000)
 
 	go ss.nodeBalancer()
+
+	ss.libstoreClientChan = make(chan clientRequest, 8000)
+	libstoreHandler := new(libstoreClients)
+	libstoreHandler.clients = make(map[string]*rpc.Client)
+	libstoreHandler.reqChan = ss.libstoreClientChan
+
+	go libstoreHandler.handleClients()
 
 	rpc.RegisterName("StorageServer", ss)
 	rpc.HandleHTTP()
@@ -398,6 +403,7 @@ func (ss *storageServer) RemoveFromList(args *storagerpc.PutArgs, reply *storage
 func (ss *storageServer) nodeBalancer() {
 	LOGV.Println("NodeBalancer:", ss.nodeID, "Starting Node Balancer!")
 	for {
+		//fmt.Println("AAAAAA", len(ss.nodeBalChan))
 		select {
 		case c := <-ss.nodeBalChan:
 			LOGV.Println("NodeBalancer:", ss.nodeID, "Recieved command!")
@@ -413,7 +419,7 @@ func (ss *storageServer) nodeBalancer() {
 				nodeChan <- c
 			} else {
 				LOGV.Println("NodeBalancer:", ss.nodeID, "Initializing node Handler!")
-				nc := c.init()
+				nc := c.init(ss.libstoreClientChan)
 				if nc != nil {
 					ss.nodeHandlers[key] = nc
 				}

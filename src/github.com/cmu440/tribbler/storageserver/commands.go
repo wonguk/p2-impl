@@ -1,6 +1,7 @@
 package storageserver
 
 import (
+	"container/list"
 	"sync"
 
 	"github.com/cmu440/tribbler/rpc/storagerpc"
@@ -8,7 +9,7 @@ import (
 
 type command interface {
 	run(node *storageNode)
-	init() chan command
+	init(c chan clientRequest) chan command
 	getKey() string
 }
 
@@ -66,7 +67,7 @@ func (c *getCmd) run(node *storageNode) {
 	c.result <- nil
 }
 
-func (c *getCmd) init() chan command {
+func (c *getCmd) init(client chan clientRequest) chan command {
 	LOGE.Println("GetCmd:", "Key not found", c.args.Key)
 	c.reply.Status = storagerpc.KeyNotFound
 	c.result <- nil
@@ -81,7 +82,15 @@ func (c *getCmd) getKey() string {
 func (c *getListCmd) run(node *storageNode) {
 	LOGV.Println("GetListCmd:", c.args.Key)
 	c.reply.Status = storagerpc.OK
-	c.reply.Value = node.listData
+	//c.reply.Value = node.listData
+
+	c.reply.Value = make([]string, node.listData.Len())
+
+	index := 0
+	for e := node.listData.Front(); e != nil; e = e.Next() {
+		c.reply.Value[index] = (e.Value).(string)
+		index++
+	}
 
 	// Lease
 	if c.args.WantLease {
@@ -101,7 +110,7 @@ func (c *getListCmd) run(node *storageNode) {
 	c.result <- nil
 }
 
-func (c *getListCmd) init() chan command {
+func (c *getListCmd) init(client chan clientRequest) chan command {
 	LOGE.Println("GetListCmd:", "Key not found", c.args.Key)
 	c.reply.Status = storagerpc.KeyNotFound
 	c.result <- nil
@@ -130,21 +139,21 @@ func (c *putCmd) run(node *storageNode) {
 	c.result <- nil
 }
 
-func (c *putCmd) init() chan command {
+func (c *putCmd) init(client chan clientRequest) chan command {
 	LOGV.Println("PutCmd:", "Initializing storage node...", c.args.Key)
 	sn := new(storageNode)
 
 	sn.data = c.args.Value
-	sn.addLease = make(chan string)
+	sn.addLease = make(chan string, 100)
 	sn.revokeLease = make(chan bool)
 	sn.releaseLease = make(chan bool)
-	sn.leaseRequest = make(chan leaseRequest)
+	sn.leaseRequest = make(chan leaseRequest, 100)
 	sn.doneLease = make(chan bool)
-	sn.commands = make(chan command)
+	sn.commands = make(chan command, 100)
 	sn.putMutex = new(sync.Mutex)
 
 	go sn.handleNode()
-	go leaseMaster(c.args.Key, sn.addLease, sn.revokeLease, sn.doneLease, sn.releaseLease, sn.leaseRequest)
+	go leaseMaster(c.args.Key, sn.addLease, sn.revokeLease, sn.doneLease, sn.releaseLease, sn.leaseRequest, client)
 
 	c.reply.Status = storagerpc.OK
 	c.result <- nil
@@ -160,8 +169,8 @@ func (c *appendCmd) run(node *storageNode) {
 	LOGV.Println("AppendCmd:", c.args.Key)
 	node.putMutex.Lock()
 	defer node.putMutex.Unlock()
-	for _, d := range node.listData {
-		if d == c.args.Value {
+	for e := node.listData.Front(); e != nil; e = e.Next() { //_, d := range node.listData {
+		if (e.Value).(string) == c.args.Value {
 			LOGE.Println("AppendCmd:", c.args.Key, c.args.Value, "Item Exists!")
 			c.reply.Status = storagerpc.ItemExists
 			c.result <- nil
@@ -174,28 +183,29 @@ func (c *appendCmd) run(node *storageNode) {
 	<-node.doneLease
 	LOGV.Println("AppendCmd:", "leases revoked", c.args.Key)
 
-	node.listData = append(node.listData, c.args.Value)
+	node.listData.PushBack(c.args.Value) // = append(node.listData, c.args.Value)
 	node.releaseLease <- true
 
 	c.reply.Status = storagerpc.OK
 	c.result <- nil
 }
 
-func (c *appendCmd) init() chan command {
+func (c *appendCmd) init(client chan clientRequest) chan command {
 	LOGV.Println("AppendCmd:", "Initializing storage node...", c.args.Key)
 	sn := new(storageNode)
 
-	sn.listData = []string{c.args.Value}
-	sn.addLease = make(chan string)
+	sn.listData = list.New() // []string{c.args.Value}
+	sn.listData.PushBack(c.args.Value)
+	sn.addLease = make(chan string, 100)
 	sn.revokeLease = make(chan bool)
 	sn.releaseLease = make(chan bool)
-	sn.leaseRequest = make(chan leaseRequest)
+	sn.leaseRequest = make(chan leaseRequest, 100)
 	sn.doneLease = make(chan bool)
-	sn.commands = make(chan command)
+	sn.commands = make(chan command, 100)
 	sn.putMutex = new(sync.Mutex)
 
 	go sn.handleNode()
-	go leaseMaster(c.args.Key, sn.addLease, sn.revokeLease, sn.doneLease, sn.releaseLease, sn.leaseRequest)
+	go leaseMaster(c.args.Key, sn.addLease, sn.revokeLease, sn.doneLease, sn.releaseLease, sn.leaseRequest, client)
 
 	c.reply.Status = storagerpc.OK
 	c.result <- nil
@@ -213,8 +223,8 @@ func (c *removeCmd) run(node *storageNode) {
 	defer node.putMutex.Unlock()
 
 	LOGV.Println("RemoveCmd:", "Looking for", c.args.Value, c.args.Key)
-	for i := range node.listData {
-		if node.listData[i] == c.args.Value {
+	for e := node.listData.Front(); e != nil; e = e.Next() { //i := range node.listData {
+		if (e.Value).(string) == c.args.Value {
 			LOGV.Println("RemoveCmd:", "Found Value!", c.args.Key)
 
 			LOGV.Println("RemoveCmd:", "revoking leases...", c.args.Key)
@@ -222,7 +232,7 @@ func (c *removeCmd) run(node *storageNode) {
 			<-node.doneLease
 			LOGV.Println("RemoveCmd:", "leases revoked", c.args.Key)
 
-			node.listData = append(node.listData[:i], node.listData[i+1:]...)
+			node.listData.Remove(e)
 
 			node.releaseLease <- true
 
@@ -238,7 +248,7 @@ func (c *removeCmd) run(node *storageNode) {
 	c.result <- nil
 }
 
-func (c *removeCmd) init() chan command {
+func (c *removeCmd) init(client chan clientRequest) chan command {
 	LOGE.Println("RemoveCmd:", "Key Not Found")
 	c.reply.Status = storagerpc.KeyNotFound
 	c.result <- nil

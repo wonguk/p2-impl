@@ -1,6 +1,7 @@
 package storageserver
 
 import (
+	//	"fmt"
 	"net/rpc"
 	"time"
 
@@ -9,7 +10,7 @@ import (
 
 type leaseRequest chan bool
 
-func leaseMaster(key string, add chan string, revoke, done, release chan bool, leaseReq chan leaseRequest) {
+func leaseMaster(key string, add chan string, revoke, done, release chan bool, leaseReq chan leaseRequest, client chan clientRequest) {
 	LOGV.Println("Lease Master:", key, "Starting lease master for")
 	leases := make(map[int]chan bool)
 	back := make(chan int)
@@ -35,20 +36,6 @@ func leaseMaster(key string, add chan string, revoke, done, release chan bool, l
 
 			leaseAvail = false
 
-			// Delete leases one by one and return when none left
-			/*for {
-				LOGV.Println("Lease Master:", key, len(leases), "leases left")
-				l := <-back
-				LOGV.Println("Lease Master:", key, "Lease revoked by", l)
-				delete(leases, l)
-
-				if len(leases) == 0 {
-					LOGV.Println("Lease Master:", key, "Done revoking lease")
-					done <- true
-					break
-				}
-			}*/
-
 		// StructureNode has added a new lease
 		case l := <-add:
 			LOGV.Println("Lease Master:", key, "Lease requested by", l)
@@ -67,7 +54,7 @@ func leaseMaster(key string, add chan string, revoke, done, release chan bool, l
 			kill := make(chan bool)
 			leases[cur] = kill
 
-			go leaseHandler(l, key, cur, kill, back)
+			go leaseHandler(l, key, cur, kill, back, client)
 
 			cur++
 		case l := <-back:
@@ -86,7 +73,7 @@ func leaseMaster(key string, add chan string, revoke, done, release chan bool, l
 	}
 }
 
-func leaseHandler(lease, key string, i int, kill chan bool, back chan int) {
+func leaseHandler(lease, key string, i int, kill chan bool, back chan int, client chan clientRequest) {
 	LOGV.Println("Lease Handler:", key, "starting lease", i, "for", lease)
 
 	d := storagerpc.LeaseSeconds + storagerpc.LeaseGuardSeconds
@@ -102,12 +89,10 @@ func leaseHandler(lease, key string, i int, kill chan bool, back chan int) {
 		select {
 		case <-kill:
 			LOGV.Println("Lease Handler:", key, "Revoking lease")
-			libst, err := rpc.DialHTTP("tcp", lease)
-			if err != nil {
-				LOGE.Println("Lease Handler:", key, lease, "libstore connect error:", err)
-			}
-			defer libst.Close()
+			req := clientRequest{lease, make(chan *rpc.Client)}
+			client <- req
 
+			libst := <-req.ret
 			revoke = libst.Go("LeaseCallbacks.RevokeLease", args, reply, nil)
 
 			// TODO Check status?
@@ -120,6 +105,38 @@ func leaseHandler(lease, key string, i int, kill chan bool, back chan int) {
 			back <- i
 			return
 
+		}
+	}
+}
+
+type clientRequest struct {
+	lib string
+	ret chan *rpc.Client
+}
+
+type libstoreClients struct {
+	clients map[string]*rpc.Client
+	reqChan chan clientRequest
+}
+
+func (l *libstoreClients) handleClients() {
+	for {
+		//fmt.Println("BBBBBBBBBBB", len(l.reqChan))
+		select {
+		case req := <-l.reqChan:
+			client, ok := l.clients[req.lib]
+
+			if ok {
+				req.ret <- client
+			} else {
+				libst, err := rpc.DialHTTP("tcp", req.lib)
+				if err != nil {
+					LOGE.Println("ASDASD")
+				}
+
+				l.clients[req.lib] = libst
+				req.ret <- libst
+			}
 		}
 	}
 }
