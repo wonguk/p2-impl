@@ -1,6 +1,7 @@
 package libstore
 
 import (
+	"container/list"
 	"time"
 
 	"github.com/cmu440/tribbler/rpc/storagerpc"
@@ -41,7 +42,8 @@ type cache struct {
 type queryCell struct {
 	key        string
 	queryChan  chan *queryRequest
-	deleteChan chan struct{}
+	deleteChan chan bool
+	times      *list.List
 
 	duration int
 	count    int
@@ -187,14 +189,15 @@ func (qm *queryMaster) startQueryMaster() {
 				query = new(queryCell)
 
 				query.queryChan = make(chan *queryRequest)
-				query.deleteChan = make(chan struct{})
+				query.deleteChan = make(chan bool)
+
 				query.key = req.key
+				query.times = list.New()
 
 				qm.queryMap[req.key] = query
 
 				go query.queryHandler(qm.deleteChan)
 			}
-
 			query.queryChan <- req
 		case key := <-qm.deleteChan:
 			LOGV.Println("[LIB]", "QueryMaster", "delete request for", key)
@@ -202,7 +205,7 @@ func (qm *queryMaster) startQueryMaster() {
 
 			if ok {
 				LOGV.Println("[LIB]", "QueryMaster", "closing delete chan for", key)
-				close(q.deleteChan)
+				q.deleteChan <- true
 			}
 
 			delete(qm.queryMap, key)
@@ -221,17 +224,33 @@ func (qc *queryCell) queryHandler(del chan string) {
 			LOGV.Println("[LIB]", "QueryCell", "Query Duration reached for", qc.key)
 			del <- qc.key
 		case req := <-qc.queryChan:
-			LOGV.Println("[LIB]", "QueryCell", "incrementing count for", qc.key)
-			qc.count++
-			if qc.count >= storagerpc.QueryCacheThresh {
-				LOGV.Println("[LIB]", "QueryCell", "count reached Threshold for", qc.key)
-				req.lease <- true
+			epoch.Reset(duration)
 
-				del <- qc.key
-			} else {
-				LOGV.Println("[LIB]", "QueryCell", "threshold not met", qc.count)
-				req.lease <- false
+			cur := time.Now()
+			qc.times.PushFront(cur)
+			e := qc.times.Front()
+
+			ok := true
+
+			for i := 0; i <= storagerpc.QueryCacheThresh; i++ {
+				if e == nil || cur.Sub((e.Value).(time.Time)).Seconds() > storagerpc.QueryCacheSeconds {
+					req.lease <- false
+
+					for ; e != nil; e = e.Next() {
+						qc.times.Remove(e)
+					}
+
+					ok = false
+					break
+				}
+
+				e = e.Next()
 			}
+
+			if ok {
+				req.lease <- true
+			}
+
 		case <-qc.deleteChan:
 			LOGV.Println("[LIB]", "QueryCell", "deleting querycell for", qc.key)
 			return

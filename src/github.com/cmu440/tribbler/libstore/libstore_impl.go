@@ -480,38 +480,3 @@ func (ls *libstore) addToCache(key, value string, listValue []string, duration i
 
 	ls.cacheMaster.newCacheChan <- cc
 }
-
-/*
-func (ls *libstore) initStorageClients() error {
-	LOGV.Println("[LIB]", "initStorageClients:", "initializing clients...")
-	ls.storageclients = make([]*rpc.Client, len(ls.storageservers))
-
-	for i, node := range ls.storageservers {
-		client, err := rpc.DialHTTP("tcp", node.HostPort)
-
-		for err != nil {
-			LOGE.Println("[LIB]", "NewLibstore:", "Error initializing client",
-				node.NodeID, err)
-
-			time.Sleep(time.Second)
-
-			client, err = rpc.DialHTTP("tcp", node.HostPort)
-		}
-
-		ls.storageclients[i] = client
-	}
-
-	args := new(storagerpc.GetServersArgs)
-	reply := new(storagerpc.GetServersReply)
-
-	for _, client := range ls.storageclients {
-		client.Call("StorageServer.GetServers", args, reply)
-
-		for reply.Status != storagerpc.OK {
-			time.Sleep(time.Second)
-			client.Call("StorageServer.GetServers", args, reply)
-		}
-	}
-
-	return nil
-}*/
